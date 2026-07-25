@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Stream8 — Aggregatore di Streaming</title>
+    <meta name="description" content="Stream8 — il tuo aggregatore personale di film, serie TV e anime. 100% client-side, nessun dato lascia il tuo browser." />
+
+    <!-- PWA: manifest e tema -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#14181A" id="theme-color-meta" />
+    <meta name="color-scheme" content="dark light" />
+
+    <!-- Favicon: SVG moderno con fallback ICO multi-risoluzione per i browser legacy -->
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icons/favicon.ico" sizes="any" />
+    <link rel="icon" href="/icons/icon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/icons/icon-16.png" sizes="16x16" type="image/png" />
+
+    <!-- iOS/iPadOS: Safari non legge il manifest per icona/nome, servono i meta dedicati -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Stream8" />
+
+    <!-- Android/Chrome (ridondante col manifest ma innocuo, alcune WebView legacy lo richiedono) -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="Stream8" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://api.themoviedb.org" />
+    <link rel="preconnect" href="https://image.tmdb.org" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

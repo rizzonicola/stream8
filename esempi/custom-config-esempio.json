@@ -1,0 +1,5 @@
+{
+  "movie_pattern": "{base_url}/movie/{tmdb_id}/",
+  "episode_pattern": "{base_url}/tv/{tmdb_id}/{season}/{episode}/",
+  "anime_pattern": "{base_url}/tv/{tmdb_id}/{season}/{episode}/"
+}
