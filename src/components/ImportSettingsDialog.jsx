@@ -1,4 +1,3 @@
-import React from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Typography, Button, Alert } from '@mui/material';
 import { t } from '../i18n';
 

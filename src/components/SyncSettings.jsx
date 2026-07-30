@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Box,
   Typography,
@@ -29,6 +29,16 @@ export default function SyncSettings({ lang, sync, onUpdateSync, syncing, onSync
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState(null);
   const [checkSuccess, setCheckSuccess] = useState(false);
+  // Se l'utente naviga via da Impostazioni mentre la verifica del server è
+  // ancora in corso, la Promise si risolve comunque più tardi: senza questa
+  // guardia, gli aggiornamenti di stato risultanti arriverebbero su un
+  // componente ormai smontato.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const handleToggleEnabled = (enabled) => {
     onUpdateSync({ enabled });
@@ -40,12 +50,14 @@ export default function SyncSettings({ lang, sync, onUpdateSync, syncing, onSync
     setCheckSuccess(false);
     try {
       await checkSyncServer(draftUrl.trim());
+      if (!mountedRef.current) return;
       onUpdateSync({ serverUrl: draftUrl.trim(), apiKey: draftKey.trim(), lastError: null });
       setCheckSuccess(true);
     } catch (err) {
+      if (!mountedRef.current) return;
       setCheckError(err instanceof SyncError ? err.message : 'Errore imprevisto durante la verifica.');
     } finally {
-      setChecking(false);
+      if (mountedRef.current) setChecking(false);
     }
   };
 

@@ -37,7 +37,7 @@ export function parseCustomConfig(jsonText) {
   let parsed;
   try {
     parsed = JSON.parse(jsonText);
-  } catch (e) {
+  } catch {
     throw new CustomConfigError('Il file non è un JSON valido.');
   }
 

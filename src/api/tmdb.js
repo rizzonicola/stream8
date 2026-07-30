@@ -211,7 +211,24 @@ export async function searchMulti(query, lang) {
   const data = await tmdbFetch('/search/multi', { query, language: lang });
   return (data.results || [])
     .filter((r) => r.media_type === 'movie' || r.media_type === 'tv')
-    .map((r) => normalizeItem(r));
+    .map((r) => {
+      // TMDb non ha un "media_type" per l'anime: restituisce solo
+      // 'movie'/'tv'. Senza questo controllo, un anime trovato tramite la
+      // ricerca (invece che sfogliando la sezione Anime in Home) resterebbe
+      // etichettato come 'tv' generico per sempre — e con
+      // item.mediaType !== 'anime', WatchOnDialog salterebbe del tutto la
+      // risoluzione via catena di sequel AniList, usando invece la ricerca
+      // semplice per titolo/anno (che trova sempre la prima stagione).
+      // Stesso identico criterio già usato in fetchRecommendedAnime /
+      // fetchRecentAnimeForHero, per classificare allo stesso modo un
+      // titolo indipendentemente da dove l'utente lo trova nell'app.
+      const isAnime =
+        r.media_type === 'tv' &&
+        Array.isArray(r.genre_ids) &&
+        r.genre_ids.includes(16) &&
+        r.original_language === 'ja';
+      return normalizeItem(r, isAnime ? 'anime' : r.media_type);
+    });
 }
 
 export async function fetchDetails(id, mediaType, lang) {
@@ -245,6 +262,11 @@ export async function fetchSeasonEpisodes(id, seasonNumber, lang) {
       name: e.name,
       overview: e.overview,
       stillPath: e.still_path,
+      // Usato solo per derivare l'anno di uscita della stagione TMDb
+      // selezionata, necessario al risolutore AniList per scegliere il ramo
+      // corretto quando la catena dei sequel presenta un bivio (vedi
+      // resolveAnilistForSeason in api/anilist.js).
+      airDate: e.air_date || null,
     }));
   } catch {
     return [];

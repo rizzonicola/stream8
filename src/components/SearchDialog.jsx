@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -24,6 +24,8 @@ export default function SearchDialog({ open, lang, onClose, onSelect }) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  const latestRequestId = useRef(0);
+
   useEffect(() => {
     if (!open) {
       setQuery('');
@@ -38,10 +40,25 @@ export default function SearchDialog({ open, lang, onClose, onSelect }) {
     }
     setLoading(true);
     const handle = setTimeout(() => {
+      const requestId = ++latestRequestId.current;
       searchMulti(query.trim(), tmdbLangCode(lang))
-        .then(setResults)
-        .catch(() => setResults([]))
-        .finally(() => setLoading(false));
+        .then((data) => {
+          // Se nel frattempo è partita una ricerca più recente (utente ha
+          // continuato a digitare), questa risposta è ormai obsoleta:
+          // applicarla comunque mostrerebbe risultati sbagliati per la
+          // query attuale se arrivasse dopo quella più recente (rete non
+          // garantisce l'ordine di arrivo delle risposte).
+          if (latestRequestId.current !== requestId) return;
+          setResults(data);
+        })
+        .catch(() => {
+          if (latestRequestId.current !== requestId) return;
+          setResults([]);
+        })
+        .finally(() => {
+          if (latestRequestId.current !== requestId) return;
+          setLoading(false);
+        });
     }, 350);
     return () => clearTimeout(handle);
   }, [query, lang]);

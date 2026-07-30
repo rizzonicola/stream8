@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { STORAGE_KEYS } from '../utils/storageKeys';
 import { useConsent } from './ConsentContext';
 import { useSettings } from './SettingsContext';
@@ -192,6 +192,110 @@ export function HistoryProvider({ children }) {
 
   const syncNow = useCallback(() => runSync(undefined), [runSync]);
 
+  // Ognuna di queste funzioni è avvolta in useCallback: senza, veniva
+  // ricreata ad ogni cambio di `history` (cioè quasi ad ogni azione
+  // dell'utente), e la nuova identità si propagava come nuova prop
+  // `onRemove`/`onSelect` fino a HistorySection -> HorizontalList ->
+  // MediaCard, vanificando i loro memo() e causando un re-render dell'intera
+  // lista ad ogni singola aggiunta/rimozione, invece che delle sole card
+  // effettivamente cambiate.
+  const addEntry = useCallback(
+    (entry) => {
+      const key = `${entry.mediaType}-${entry.id}-${entry.season ?? ''}-${entry.episode ?? ''}`;
+      const next = [
+        { ...entry, _key: key, watchedAt: Date.now(), deleted: false },
+        ...rawHistoryRef.current.filter((e) => e._key !== key),
+      ].slice(0, 100);
+      setRaw(next);
+      log('voce aggiunta:', key);
+      if (settings.sync.enabled && settings.sync.autoSync) {
+        // Fire-and-forget: non blocca l'azione dell'utente. Passiamo
+        // esplicitamente `next` come base del merge, invece di lasciare
+        // che runSync rilegga lo stato da solo in un momento successivo:
+        // questo è ciò che garantisce che la voce appena aggiunta sia
+        // sempre presente nel merge, eliminando la race condition.
+        runSync(next);
+      }
+    },
+    [setRaw, settings.sync.enabled, settings.sync.autoSync, runSync]
+  );
+
+  const removeEntry = useCallback(
+    (key) => {
+      // Cancellazione = tombstone, non rimozione secca dell'elemento.
+      // Un tombstone è una normale voce con `deleted: true` e un
+      // `watchedAt` aggiornato ad "adesso": è quello che permette al
+      // last-write-wins di mergeHistories di far vincere la
+      // cancellazione su qualunque copia più vecchia della stessa voce
+      // presente su altri dispositivi, invece di lasciare che "riappaia"
+      // al sync successivo.
+      const next = [
+        { _key: key, watchedAt: Date.now(), deleted: true },
+        ...rawHistoryRef.current.filter((e) => e._key !== key),
+      ];
+      setRaw(next);
+      log('voce cancellata (tombstone creato):', key);
+      if (settings.sync.enabled) {
+        pushDirect(next);
+      }
+    },
+    [setRaw, settings.sync.enabled, pushDirect]
+  );
+
+  const clearHistory = useCallback(() => {
+    const now = Date.now();
+    // Un tombstone per ogni voce attualmente visibile, così la
+    // cancellazione di massa si propaga voce per voce come una
+    // cancellazione singola; i tombstone già esistenti restano intatti.
+    const tombstones = rawHistoryRef.current
+      .filter((e) => !isTombstone(e))
+      .map((e) => ({ _key: e._key, watchedAt: now, deleted: true }));
+    const next = [...tombstones, ...rawHistoryRef.current.filter((e) => isTombstone(e))];
+    setRaw(next);
+    log('cronologia svuotata,', tombstones.length, 'tombstone creati');
+    if (settings.sync.enabled) {
+      pushDirect(next);
+    }
+  }, [setRaw, settings.sync.enabled, pushDirect]);
+
+  const exportHistory = useCallback(() => {
+    // Solo le voci visibili: i tombstone sono un dettaglio interno di
+    // sincronizzazione e non hanno senso in un export per l'utente.
+    const blob = new Blob([JSON.stringify(history, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `stream8-cronologia-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, [history]);
+
+  const importHistory = useCallback(
+    (jsonText) => {
+      const parsed = JSON.parse(jsonText);
+      if (!Array.isArray(parsed)) throw new Error('Il file di cronologia non è valido.');
+      // Il file importato non conosce i tombstone locali: li uniamo con
+      // mergeHistories (stesso last-write-wins usato per la rete) invece
+      // di sovrascrivere `rawHistory` di netto, così un'importazione non
+      // fa "risorgere" per sbaglio voci che erano state cancellate di
+      // proposito e non erano presenti nel file esportato in precedenza.
+      const merged = mergeHistories(
+        parsed.map((e) => ({ ...e, deleted: false })),
+        rawHistoryRef.current
+      );
+      setRaw(merged);
+      log('cronologia importata,', parsed.length, 'voci nel file');
+      if (settings.sync.enabled) {
+        pushDirect(merged);
+      }
+    },
+    [setRaw, settings.sync.enabled, pushDirect]
+  );
+
   const api = useMemo(
     () => ({
       history,
@@ -201,91 +305,13 @@ export function HistoryProvider({ children }) {
       groupedHistory: groupHistoryByShow(history),
       syncing,
       syncNow,
-      addEntry: (entry) => {
-        const key = `${entry.mediaType}-${entry.id}-${entry.season ?? ''}-${entry.episode ?? ''}`;
-        const next = [
-          { ...entry, _key: key, watchedAt: Date.now(), deleted: false },
-          ...rawHistoryRef.current.filter((e) => e._key !== key),
-        ].slice(0, 100);
-        setRaw(next);
-        log('voce aggiunta:', key);
-        if (settings.sync.enabled && settings.sync.autoSync) {
-          // Fire-and-forget: non blocca l'azione dell'utente. Passiamo
-          // esplicitamente `next` come base del merge, invece di lasciare
-          // che runSync rilegga lo stato da solo in un momento successivo:
-          // questo è ciò che garantisce che la voce appena aggiunta sia
-          // sempre presente nel merge, eliminando la race condition.
-          runSync(next);
-        }
-      },
-      removeEntry: (key) => {
-        // Cancellazione = tombstone, non rimozione secca dell'elemento.
-        // Un tombstone è una normale voce con `deleted: true` e un
-        // `watchedAt` aggiornato ad "adesso": è quello che permette al
-        // last-write-wins di mergeHistories di far vincere la
-        // cancellazione su qualunque copia più vecchia della stessa voce
-        // presente su altri dispositivi, invece di lasciare che "riappaia"
-        // al sync successivo.
-        const next = [
-          { _key: key, watchedAt: Date.now(), deleted: true },
-          ...rawHistoryRef.current.filter((e) => e._key !== key),
-        ];
-        setRaw(next);
-        log('voce cancellata (tombstone creato):', key);
-        if (settings.sync.enabled) {
-          pushDirect(next);
-        }
-      },
-      clearHistory: () => {
-        const now = Date.now();
-        // Un tombstone per ogni voce attualmente visibile, così la
-        // cancellazione di massa si propaga voce per voce come una
-        // cancellazione singola; i tombstone già esistenti restano intatti.
-        const tombstones = rawHistoryRef.current
-          .filter((e) => !isTombstone(e))
-          .map((e) => ({ _key: e._key, watchedAt: now, deleted: true }));
-        const next = [...tombstones, ...rawHistoryRef.current.filter((e) => isTombstone(e))];
-        setRaw(next);
-        log('cronologia svuotata,', tombstones.length, 'tombstone creati');
-        if (settings.sync.enabled) {
-          pushDirect(next);
-        }
-      },
-      exportHistory: () => {
-        // Solo le voci visibili: i tombstone sono un dettaglio interno di
-        // sincronizzazione e non hanno senso in un export per l'utente.
-        const blob = new Blob([JSON.stringify(history, null, 2)], {
-          type: 'application/json',
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `stream8-cronologia-${new Date().toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      },
-      importHistory: (jsonText) => {
-        const parsed = JSON.parse(jsonText);
-        if (!Array.isArray(parsed)) throw new Error('Il file di cronologia non è valido.');
-        // Il file importato non conosce i tombstone locali: li uniamo con
-        // mergeHistories (stesso last-write-wins usato per la rete) invece
-        // di sovrascrivere `rawHistory` di netto, così un'importazione non
-        // fa "risorgere" per sbaglio voci che erano state cancellate di
-        // proposito e non erano presenti nel file esportato in precedenza.
-        const merged = mergeHistories(
-          parsed.map((e) => ({ ...e, deleted: false })),
-          rawHistoryRef.current
-        );
-        setRaw(merged);
-        log('cronologia importata,', parsed.length, 'voci nel file');
-        if (settings.sync.enabled) {
-          pushDirect(merged);
-        }
-      },
+      addEntry,
+      removeEntry,
+      clearHistory,
+      exportHistory,
+      importHistory,
     }),
-    [history, syncing, syncNow, pushDirect, runSync, settings.sync.enabled, settings.sync.autoSync, setRaw]
+    [history, syncing, syncNow, addEntry, removeEntry, clearHistory, exportHistory, importHistory]
   );
 
   return <HistoryContext.Provider value={api}>{children}</HistoryContext.Provider>;

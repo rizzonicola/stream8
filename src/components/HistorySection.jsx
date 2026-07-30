@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import HorizontalList from './HorizontalList';
 import { t } from '../i18n';
 

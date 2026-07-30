@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Box, CircularProgress, Container } from '@mui/material';
 import HeroSlider from '../components/HeroSlider';
 import HistorySection from '../components/HistorySection';

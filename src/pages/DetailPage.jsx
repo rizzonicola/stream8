@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
   Container,
@@ -7,7 +7,6 @@ import {
   IconButton,
   Chip,
   Stack,
-  CircularProgress,
   Select,
   MenuItem,
   Avatar,
@@ -135,6 +134,17 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
   };
 
   const backdrop = backdropUrl(details.backdropPath, 'w1280') || posterUrl(details.posterPath);
+
+  // Anno di uscita della stagione TMDb correntemente selezionata (dal primo
+  // episodio disponibile): usato solo come "spareggio" quando la catena di
+  // sequel AniList presenta un bivio (più sequel diretti, es. spin-off o
+  // linee temporali separate) — vedi resolveAnilistForSeason in
+  // api/anilist.js. Non blocca né rallenta nulla: è un semplice calcolo
+  // locale su dati già scaricati.
+  const currentSeasonYear = useMemo(() => {
+    const airDate = episodes[0]?.airDate;
+    return airDate ? Number(airDate.slice(0, 4)) : undefined;
+  }, [episodes]);
 
   const runtimeLabel = useMemo(() => {
     if (!details.runtimeMinutes) return null;
@@ -427,6 +437,10 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
         settings={settings}
         onClose={closeWatchDialog}
         onConfirmWatch={handleConfirmWatch}
+        seasons={seasons}
+        season={season}
+        episode={episode}
+        seasonYear={currentSeasonYear}
       />
     </Box>
   );

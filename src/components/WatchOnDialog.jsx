@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -16,8 +16,8 @@ import {
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import ErrorRoundedIcon from '@mui/icons-material/ErrorRounded';
 import { MAINSTREAM_SERVICES, MAINSTREAM_TMDB_PROVIDER_NAMES } from '../utils/streamingServices';
-import { fetchWatchProviders } from '../api/tmdb';
-import { searchAnilistMedia } from '../api/anilist';
+import { fetchWatchProviders, fetchDetails } from '../api/tmdb';
+import { searchAnilistMedia, resolveAnilistForSeason } from '../api/anilist';
 import { pickPatternForItem, patternNeedsAnilist } from '../utils/customConfigParser';
 import { t } from '../i18n';
 
@@ -64,14 +64,43 @@ function renderAvatar(svc, isUnavailable, isResolving, bgColor) {
  *    viene risolto al volo tramite l'API pubblica di AniList solo al
  *    click (mai in anticipo). Se la risoluzione fallisce, la stessa icona
  *    rossa segnala il problema.
+ *    Per le serie anime (item.mediaType === 'anime') la risoluzione segue
+ *    l'intera catena di sequel di AniList e somma progressivamente gli
+ *    episodi per individuare la stagione/parte AniList corretta anche
+ *    quando TMDb accorpa più "parti" (split-cour, es. stagioni divise in
+ *    due su AniList) sotto un'unica stagione — vedi resolveAnilistForSeason
+ *    in api/anilist.js. Per film e serie non-anime resta la semplice
+ *    ricerca per titolo/anno. In entrambi i casi, se la ricerca con il
+ *    titolo nella lingua dell'app non trova nulla, si ritenta una volta
+ *    con il titolo inglese di TMDb (spesso più vicino a come AniList
+ *    indicizza il titolo) prima di arrendersi.
  */
-function WatchOnDialog({ open, onClose, lang, item, settings, onConfirmWatch }) {
+function WatchOnDialog({
+  open,
+  onClose,
+  lang,
+  item,
+  settings,
+  onConfirmWatch,
+  seasons,
+  season,
+  episode,
+  seasonYear,
+}) {
   const [providerData, setProviderData] = useState({ names: [], link: null });
   const [loading, setLoading] = useState(true);
   // Usato solo per i servizi custom: la loro disponibilità non è nota in
   // anticipo (dipende da una risoluzione AniList fatta al click).
   const [customUnavailableIds, setCustomUnavailableIds] = useState(() => new Set());
   const [resolvingId, setResolvingId] = useState(null);
+  // Rispecchia sempre `open` in modo sincrono, leggibile dentro la
+  // continuazione asincrona di handlePickCustom qui sotto: senza, se
+  // l'utente chiude il dialog mentre la risoluzione AniList è ancora in
+  // volo, al termine si aprirebbe comunque il link (e si registrerebbe una
+  // voce in cronologia) come se l'utente avesse confermato una scelta che
+  // in realtà aveva già annullato chiudendo il dialog.
+  const openRef = useRef(open);
+  openRef.current = open;
 
   const mainstreamActive = MAINSTREAM_SERVICES.filter((s) =>
     settings.selectedMainstream.includes(s.id)
@@ -120,7 +149,42 @@ function WatchOnDialog({ open, onClose, lang, item, settings, onConfirmWatch }) 
     }
 
     setResolvingId(svc.id);
-    const anilist = await searchAnilistMedia(item.title, item.year ? Number(item.year) : undefined);
+    const year = item.year ? Number(item.year) : undefined;
+    const tmdbType = item.mediaType === 'movie' ? 'movie' : 'tv';
+    // Solo le serie anime hanno stagioni/split-cour da mappare tramite la
+    // catena di sequel; per film (e l'improbabile caso di un servizio
+    // custom con {anilist_id} su un titolo non-anime) la ricerca semplice
+    // per titolo/anno resta sufficiente e più economica.
+    const resolve = (title) =>
+      item.mediaType === 'anime'
+        ? resolveAnilistForSeason({ title, year, seasons, season, episode, seasonYear })
+        : searchAnilistMedia(title, year);
+
+    let anilist = await resolve(item.title);
+
+    // TMDb restituisce item.title nella lingua dell'app (es. italiano),
+    // che spesso non corrisponde al titolo/sinonimo con cui AniList indicizza
+    // l'anime (di norma inglese/romaji). Se la prima ricerca fallisce e
+    // l'app non è già in inglese, si ritenta UNA sola volta con il titolo
+    // inglese di TMDb prima di segnalare il servizio come non disponibile:
+    // resta comunque "on demand" (parte solo qui, solo se necessario).
+    if (!anilist && lang !== 'en') {
+      try {
+        const enDetails = await fetchDetails(item.id, tmdbType, 'en-US');
+        if (enDetails?.title && enDetails.title !== item.title) {
+          anilist = await resolve(enDetails.title);
+        }
+      } catch (err) {
+        console.warn('[Stream8 AniList] recupero titolo inglese TMDb fallito:', err);
+      }
+    }
+
+    // L'utente potrebbe aver chiuso il dialog mentre la richiesta era in
+    // volo: in tal caso non ha più senso aggiornare la UI del dialog né,
+    // soprattutto, procedere ad aprire un link/registrare una voce in
+    // cronologia come se fosse stata una scelta ancora valida.
+    if (!openRef.current) return;
+
     setResolvingId(null);
 
     if (!anilist) {

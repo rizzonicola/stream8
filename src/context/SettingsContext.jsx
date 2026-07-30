@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { STORAGE_KEYS } from '../utils/storageKeys';
 
 // Le preferenze (servizi di streaming, tema, lingua) sono dati tecnicamente
@@ -57,48 +57,91 @@ export function SettingsProvider({ children }) {
     saveSettings(settings);
   }, [settings]);
 
+  // Ogni funzione esposta è avvolta in useCallback con `setSettings` come
+  // unica dipendenza (stabile, da useState): l'identità resta la stessa tra
+  // un render e l'altro invece di essere ricreata ad ogni cambio di
+  // `settings`. Senza questo, ogni consumatore che usa una di queste
+  // funzioni in un array di dipendenze (es. updateSync in HistoryContext) si
+  // ritroverebbe con un nuovo riferimento ad ogni impostazione modificata,
+  // propagando ricalcoli/re-render inutili a valle e vanificando i memo()
+  // sui componenti figli.
+  const completeOnboarding = useCallback(
+    (selectedMainstream, customServices) =>
+      setSettings((s) => ({
+        ...s,
+        onboardingComplete: true,
+        selectedMainstream,
+        customServices,
+      })),
+    []
+  );
+  const updateMainstream = useCallback(
+    (selectedMainstream) => setSettings((s) => ({ ...s, selectedMainstream })),
+    []
+  );
+  const addCustomService = useCallback(
+    (service) => setSettings((s) => ({ ...s, customServices: [...s.customServices, service] })),
+    []
+  );
+  const removeCustomService = useCallback(
+    (id) =>
+      setSettings((s) => ({
+        ...s,
+        customServices: s.customServices.filter((c) => c.id !== id),
+      })),
+    []
+  );
+  const setTheme = useCallback((theme) => setSettings((s) => ({ ...s, theme })), []);
+  const setLanguage = useCallback((language) => setSettings((s) => ({ ...s, language })), []);
+  // Aggiorna anche solo un sottoinsieme dei campi di sincronizzazione
+  // (usato sia dalla UI in Impostazioni sia, internamente, da
+  // HistoryContext per registrare l'esito dell'ultimo sync).
+  const updateSync = useCallback(
+    (partial) => setSettings((s) => ({ ...s, sync: { ...s.sync, ...partial } })),
+    []
+  );
+  // Applica impostazioni ricevute da un link di condivisione
+  // (vedi utils/shareSettings.js). Sovrascrive SOLO i campi presenti
+  // in `partial` (già filtrati in whitelist dal chiamante): non tocca
+  // mai `sync` — anche se per qualche motivo fosse presente in
+  // `partial`, viene esplicitamente ignorato qui come ultima difesa —
+  // e non tocca la cronologia, che vive in un contesto separato.
+  // L'onboarding viene marcato completo: chi importa una
+  // configurazione funzionante non deve rifare il wizard iniziale.
+  const importSettings = useCallback(
+    (partial) =>
+      setSettings((s) => ({
+        ...s,
+        ...partial,
+        sync: s.sync,
+        onboardingComplete: true,
+      })),
+    []
+  );
+
   const api = useMemo(
     () => ({
       settings,
-      completeOnboarding: (selectedMainstream, customServices) =>
-        setSettings((s) => ({
-          ...s,
-          onboardingComplete: true,
-          selectedMainstream,
-          customServices,
-        })),
-      updateMainstream: (selectedMainstream) =>
-        setSettings((s) => ({ ...s, selectedMainstream })),
-      addCustomService: (service) =>
-        setSettings((s) => ({ ...s, customServices: [...s.customServices, service] })),
-      removeCustomService: (id) =>
-        setSettings((s) => ({
-          ...s,
-          customServices: s.customServices.filter((c) => c.id !== id),
-        })),
-      setTheme: (theme) => setSettings((s) => ({ ...s, theme })),
-      setLanguage: (language) => setSettings((s) => ({ ...s, language })),
-      // Aggiorna anche solo un sottoinsieme dei campi di sincronizzazione
-      // (usato sia dalla UI in Impostazioni sia, internamente, da
-      // HistoryContext per registrare l'esito dell'ultimo sync).
-      updateSync: (partial) => setSettings((s) => ({ ...s, sync: { ...s.sync, ...partial } })),
-      // Applica impostazioni ricevute da un link di condivisione
-      // (vedi utils/shareSettings.js). Sovrascrive SOLO i campi presenti
-      // in `partial` (già filtrati in whitelist dal chiamante): non tocca
-      // mai `sync` — anche se per qualche motivo fosse presente in
-      // `partial`, viene esplicitamente ignorato qui come ultima difesa —
-      // e non tocca la cronologia, che vive in un contesto separato.
-      // L'onboarding viene marcato completo: chi importa una
-      // configurazione funzionante non deve rifare il wizard iniziale.
-      importSettings: (partial) =>
-        setSettings((s) => ({
-          ...s,
-          ...partial,
-          sync: s.sync,
-          onboardingComplete: true,
-        })),
+      completeOnboarding,
+      updateMainstream,
+      addCustomService,
+      removeCustomService,
+      setTheme,
+      setLanguage,
+      updateSync,
+      importSettings,
     }),
-    [settings]
+    [
+      settings,
+      completeOnboarding,
+      updateMainstream,
+      addCustomService,
+      removeCustomService,
+      setTheme,
+      setLanguage,
+      updateSync,
+      importSettings,
+    ]
   );
 
   return <SettingsContext.Provider value={api}>{children}</SettingsContext.Provider>;
