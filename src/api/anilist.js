@@ -31,6 +31,58 @@
 const ANILIST_ENDPOINT = 'https://graphql.anilist.co';
 const REQUEST_TIMEOUT_MS = 10_000;
 
+// --------------------------------------------------------------------------
+// Retry / backoff (CAUSA RADICE del fallimento sistematico sulle stagioni
+// successive — vedi il commit che ha introdotto questo blocco)
+// --------------------------------------------------------------------------
+// L'API pubblica di AniList applica un rate limit (attualmente ridotto a 30
+// richieste/minuto, invece delle 90 documentate — la stessa AniList lo
+// segnala come stato "degradato" in corso: https://docs.anilist.co/guide/rate-limiting)
+// E, sopra a quello, un "burst limiter" separato pensato apposta per
+// penalizzare richieste consecutive ravvicinate — esattamente il pattern con
+// cui `walkSequelChain` percorre la catena di sequel: una richiesta di rete
+// per ogni nodo, una dopo l'altra, senza alcuna pausa tra l'una e l'altra.
+// La ricerca iniziale (root = Stagione 1) è quasi sempre la PRIMA richiesta
+// AniList della sessione/risoluzione e quindi tipicamente va a buon fine;
+// sono le richieste AGGIUNTIVE necessarie solo per raggiungere la Stagione 2
+// e successive a incappare quasi sempre nel burst limiter. Senza alcun
+// retry, `postToAnilist` lanciava un'eccezione al primo 429, la camminata
+// si interrompeva lì (nodo non raggiungibile), e la risoluzione ripiegava
+// sulla ricerca semplice per titolo — che, quando anche il tentativo
+// vincolato all'anno fallisce, ripiega a sua volta sul solo titolo e
+// restituisce quasi sempre la Stagione 1. Risultato osservato: "ID AniList
+// delle stagioni successive introvabile, si torna sempre alla Stagione 1" —
+// non per un errore nella logica di attraversamento della catena (corretta,
+// verificata con test), ma perché ogni hop aggiuntivo di quella logica non
+// sopravviveva al primo 429 incontrato lungo il percorso.
+//
+// Soluzione: un retry con backoff esponenziale + jitter, applicato SOLO a
+// errori transitori (429 e 5xx — mai a un 400, che su AniList indica una
+// query non valida e non sparirebbe ritentando). Il campo Retry-After di
+// AniList indica quanto attendere, ma non è affidabile lato browser (non è
+// tra gli header esposti di default in CORS senza che il server lo
+// dichiari esplicitamente in Access-Control-Expose-Headers): quando c'è, lo
+// si usa; quando manca (caso comune in browser), si ricade su un backoff
+// crescente con jitter, lo stesso approccio adottato da altri client AniList
+// per lo stesso identico problema.
+const MAX_RETRIES = 4;
+const BASE_BACKOFF_MS = 600;
+const MAX_BACKOFF_MS = 8_000;
+
+function isRetryableStatus(status) {
+  return status === 429 || (status >= 500 && status < 600);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Piccola pausa fissa PRIMA di ogni richiesta successiva alla prima in una
+// stessa camminata della catena: difesa "in anticipo" contro il burst
+// limiter (che scatta su richieste troppo ravvicinate), per non dover fare
+// sempre affidamento sul solo retry reattivo dopo un 429 già ricevuto.
+const INTER_HOP_DELAY_MS = 350;
+
 // Stessa strategia di cache/deduplica usata in api/tmdb.js: evita di
 // interrogare due volte AniList per lo stesso titolo nella stessa sessione.
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minuti: questi ID non cambiano mai
@@ -53,7 +105,7 @@ function cacheKey(title, year) {
   return `${title.toLowerCase().trim()}::${year || ''}`;
 }
 
-async function postToAnilist(query, variables) {
+async function postToAnilistOnce(query, variables) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let res;
@@ -67,12 +119,49 @@ async function postToAnilist(query, variables) {
   } finally {
     clearTimeout(timer);
   }
+  // Un 429/5xx di AniList (spesso servito da Cloudflare) non sempre ha un
+  // corpo JSON valido: non deve far fallire il parsing degli errori sottostanti.
   const json = await res.json().catch(() => null);
-  if (!res.ok || json?.errors) {
-    const msg = json?.errors?.[0]?.message || `Errore AniList (${res.status})`;
-    throw new Error(msg);
+  if (!res.ok) {
+    const err = new Error(json?.errors?.[0]?.message || `Errore AniList (${res.status})`);
+    err.status = res.status;
+    // Retry-After spesso non è leggibile lato browser in CORS se il server
+    // non lo espone esplicitamente: si prova comunque, senza contarci.
+    const retryAfter = res.headers?.get?.('Retry-After');
+    err.retryAfterMs = retryAfter && !Number.isNaN(Number(retryAfter)) ? Number(retryAfter) * 1000 : null;
+    throw err;
+  }
+  if (json?.errors) {
+    const err = new Error(json.errors[0]?.message || 'Errore AniList');
+    err.status = json.errors[0]?.status;
+    throw err;
   }
   return json;
+}
+
+// Riprova SOLO gli errori transitori (429 rate/burst limit, 5xx): un 400
+// (query non valida) o un 404 (nessun risultato) non cambierebbero ritentando.
+// Vedi il blocco di commenti sopra MAX_RETRIES per il perché questo retry è
+// la causa radice del fix: senza, un solo 429 durante la camminata della
+// catena di sequel bastava a interromperla definitivamente.
+async function postToAnilist(query, variables) {
+  let lastErr;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await postToAnilistOnce(query, variables);
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryableStatus(err.status) || attempt === MAX_RETRIES) throw err;
+      const backoff = Math.min(BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS);
+      const jitter = Math.random() * backoff * 0.3;
+      const wait = err.retryAfterMs ?? backoff + jitter;
+      console.info(
+        `[Stream8 AniList] richiesta limitata (status ${err.status}), nuovo tentativo tra ${Math.round(wait)}ms (${attempt + 1}/${MAX_RETRIES})`
+      );
+      await sleep(wait);
+    }
+  }
+  throw lastErr;
 }
 
 // ---------------------------------------------------------------------
@@ -182,6 +271,64 @@ export async function searchAnilistMedia(title, year) {
 // una split-cour): ciascun nodo viene comunque messo in cache per ID, così
 // scegliere un'altra stagione/episodio dello stesso titolo più tardi nella
 // stessa sessione non genera nuove richieste per i nodi già visitati.
+
+// --------------------------------------------------------------------------
+// Persistenza locale dell'albero (localStorage)
+// --------------------------------------------------------------------------
+// Le cache `nodeCache`/`searchCache` sopra sono in memoria: durano solo
+// quanto la scheda del browser resta aperta. Qui invece si salva su disco
+// (localStorage, come il resto dell'app 100% client-side) l'albero di
+// sequel GIÀ percorso per un anime, così che riaprendo lo stesso titolo in
+// un'altra sessione (anche il giorno dopo) non si riparta mai dalla radice:
+// si riprende dall'ultimo nodo raggiunto la volta precedente, e si
+// percorrono solo gli eventuali salti NUOVI necessari per la stagione
+// richiesta ora (es.: ieri salvata la catena fino alla Stagione 4, oggi si
+// seleziona la Stagione 5 → si riparte dal nodo della Stagione 4 già in
+// cache e si fa UNA sola richiesta aggiuntiva per raggiungere la 5, non da
+// capo dalla Stagione 1).
+const CHAIN_STORAGE_PREFIX = 'stream8:anilistChain:v1:';
+
+function chainStorageKey(title, year) {
+  return CHAIN_STORAGE_PREFIX + cacheKey(title, year);
+}
+
+function loadPersistedChain(title, year) {
+  try {
+    const raw = localStorage.getItem(chainStorageKey(title, year));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.chain) && parsed.chain.length > 0 ? parsed.chain : null;
+  } catch {
+    // Storage non disponibile (modalità privata, quota esaurita, contesto
+    // senza `window`...): si ricalcola da zero, nessun crash per l'utente.
+    return null;
+  }
+}
+
+function savePersistedChain(title, year, chain) {
+  try {
+    localStorage.setItem(chainStorageKey(title, year), JSON.stringify({ chain, updatedAt: Date.now() }));
+  } catch {
+    // Idem: se non si riesce a scrivere, l'app continua a funzionare,
+    // semplicemente senza il beneficio della cache tra una sessione e l'altra.
+  }
+}
+
+/**
+ * Cancella l'albero AniList salvato in locale per un titolo (Titolo + anno
+ * della prima stagione, stessa chiave usata per calcolarlo). Pensata per un
+ * pulsante "svuota cache" nella pagina dell'opera: la volta successiva la
+ * catena verrà ricalcolata da zero, utile ad es. se AniList ha corretto nel
+ * frattempo una relazione sbagliata. Non lancia mai eccezioni.
+ */
+export function clearPersistedAnilistChain(title, year) {
+  try {
+    localStorage.removeItem(chainStorageKey(title, year));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const TV_FORMATS = new Set(['TV', 'TV_SHORT']);
 
@@ -300,35 +447,116 @@ function fetchNodeByYearOnly(title, year) {
 // numero di parti concatenate.
 const MAX_HOPS = 10;
 
-// Percorre la catena di sequel un nodo alla volta, a partire dal titolo
-// iniziale, seguendo le relazioni di tipo SEQUEL. IMPORTANTE: qui non si
-// filtra per formato — un sequel può "passare" attraverso un nodo non-TV
-// (tipicamente un film) prima di arrivare alla stagione TV successiva. Un
-// caso reale osservato: "Saga of Tanya the Evil" (TV) ha come SEQUEL diretto
-// solo il film "Youjo Senki Movie" (MOVIE), e la vera Stagione 2 (TV) è
-// collegata solo a QUEL film, non alla Stagione 1. Filtrare per formato
-// direttamente qui avrebbe interrotto la catena al primo salto, senza mai
-// scoprire la Stagione 2. Il filtro TV/TV_SHORT (per ignorare film, OVA,
-// ONA e special come possibili risposte finali) viene applicato più avanti,
-// in resolveAnilistForSeason, quando si sommano gli episodi: i nodi non-TV
-// restano nella catena come semplice "ponte" verso il nodo successivo, ma
-// non vengono mai considerati come destinazione finale né contano nella
-// somma progressiva degli episodi.
-// Ogni salto costa una piccola richiesta di rete aggiuntiva (in cache per
-// ID). Se un nodo presenta più sequel diretti (bivio, es. linee temporali
+// Applica il filtro TV/TV_SHORT e la somma progressiva degli episodi a un
+// albero già ottenuto, per capire se copre già l'episodio TMDb richiesto
+// (`target`, vedi cumulativeEpisodeTarget più sotto). Usata sia sull'albero
+// appena caricato da localStorage (per evitare QUALSIASI richiesta di rete
+// se copre già ciò che serve) sia dopo ogni singolo salto aggiunto durante
+// l'estensione della catena, per poter uscire il prima possibile.
+// Restituisce: il nodo-risultato se trovato; `null` se la catena nota finora
+// non basta (bisogna provare a estenderla); la stringa 'blocked' se un nodo
+// intermedio (non l'ultimo) ha un numero di episodi ancora sconosciuto — in
+// quel caso proseguire sarebbe una somma inaffidabile, meglio fermarsi.
+function matchInChain(chain, target) {
+  const tvNodes = chain.filter((n) => TV_FORMATS.has(n.format));
+  let cumulative = 0;
+  for (let i = 0; i < tvNodes.length; i++) {
+    const node = tvNodes[i];
+    const isLastKnown = i === tvNodes.length - 1;
+    if (node.episodes == null) {
+      return isLastKnown ? node : 'blocked';
+    }
+    if (target <= cumulative + node.episodes) return node;
+    cumulative += node.episodes;
+  }
+  return null;
+}
+
+// Percorre la catena di sequel un nodo alla volta, seguendo le relazioni di
+// tipo SEQUEL, MA a differenza di una versione "ingenua" fa due cose in più
+// pensate per ridurre al minimo le richieste di rete verso un'API oggi a
+// quota limitata (vedi il blocco di commenti su MAX_RETRIES più sopra):
+//
+// 1) Riprende da un albero già salvato in locale (`loadPersistedChain`),
+//    invece di ripartire sempre dalla radice/Stagione 1: se ieri è stata
+//    già percorsa la catena fino alla Stagione 4, oggi selezionare la
+//    Stagione 5 fa scattare UNA sola richiesta aggiuntiva (il salto verso
+//    la 5), non l'intera camminata da capo. Se invece la stagione richiesta
+//    è già COPERTA dall'albero salvato (es. richiesta la Stagione 3 quando
+//    in cache c'è già fino alla 5), il risultato arriva SENZA ALCUNA
+//    richiesta di rete: il controllo su ciò che è già noto avviene prima di
+//    qualunque chiamata. Solo quando la stagione richiesta non è ancora
+//    coperta, il nodo "di coda" dell'albero salvato viene ri-scaricato una
+//    volta (una singola richiesta) prima di provare a estendere la catena,
+//    per accorgersi di eventuali NUOVE stagioni annunciate su AniList da
+//    quando l'albero è stato salvato l'ultima volta.
+// 2) Si ferma appena trova il nodo che copre l'episodio richiesto
+//    (`target`), invece di percorrere sempre l'intera catena fino in fondo:
+//    scegliere la Stagione 1 di un anime con 10 stagioni non fa più scattare
+//    10 richieste, ne fa scattare giusto quelle necessarie a raggiungere la
+//    Stagione 1 (spesso zero, essendo la radice).
+//
+// IMPORTANTE: qui non si filtra per formato durante l'attraversamento — un
+// sequel può "passare" attraverso un nodo non-TV (tipicamente un film)
+// prima di arrivare alla stagione TV successiva. Un caso reale osservato:
+// "Saga of Tanya the Evil" (TV) ha come SEQUEL diretto solo il film "Youjo
+// Senki Movie" (MOVIE), e la vera Stagione 2 (TV) è collegata solo a QUEL
+// film, non alla Stagione 1. Filtrare per formato direttamente qui avrebbe
+// interrotto la catena al primo salto, senza mai scoprire la Stagione 2. Il
+// filtro TV/TV_SHORT viene applicato in `matchInChain` sopra: i nodi non-TV
+// restano nella catena come semplice "ponte", ma non sono mai un risultato
+// finale né contano nella somma degli episodi.
+//
+// Se un nodo presenta più sequel diretti (bivio, es. linee temporali
 // separate o spin-off), sceglie il ramo il cui anno di uscita corrisponde a
 // `seasonYearHint`; se l'anno non è disponibile o non corrisponde a nessun
-// ramo, ripiega sul primo per sicurezza. Restituisce l'elenco ordinato dei
-// nodi (radice inclusa), oppure null se anche il primo titolo non è stato
-// trovato.
-async function walkSequelChain(title, year, seasonYearHint) {
-  const root = await fetchNodeBySearch(title, year);
-  if (!root) return null;
+// ramo, ripiega sul primo per sicurezza.
+//
+// Restituisce `{ chain, match }`: `chain` è l'albero (aggiornato e salvato
+// in locale prima di ritornare), `match` è il nodo trovato oppure `null` se
+// non è stato possibile trovarlo (titolo iniziale introvabile, catena
+// esaurita, o nodo intermedio con episodi sconosciuti).
+async function resolveChainForTarget(title, year, seasonYearHint, target) {
+  let chain = loadPersistedChain(title, year);
 
-  const chain = [root];
-  const visited = new Set([root.id]);
-  let current = root;
+  if (!chain) {
+    const root = await fetchNodeBySearch(title, year);
+    if (!root) return { chain: null, match: null };
+    chain = [root];
+  } else {
+    // Se la stagione richiesta è già coperta dall'albero salvato così
+    // com'è, la si restituisce SUBITO, prima di qualunque richiesta di
+    // rete: non serve ri-scaricare nulla per rispondere a "che ID ha la
+    // Stagione 3?" quando in cache c'è già l'albero fino alla Stagione 5.
+    const knownMatch = matchInChain(chain, target);
+    if (knownMatch && knownMatch !== 'blocked') {
+      return { chain, match: knownMatch };
+    }
 
+    // Non ancora coperta: SOLO a questo punto vale la pena aggiornare il
+    // nodo di coda con una richiesta fresca (singola), per accorgersi di
+    // sequel aggiunti nel frattempo su AniList prima di estendere la catena.
+    const tail = chain[chain.length - 1];
+    const freshTail = await fetchNodeById(tail.id);
+    if (freshTail) chain = [...chain.slice(0, -1), freshTail];
+  }
+
+  const visited = new Set(chain.map((n) => n.id));
+
+  let match = matchInChain(chain, target);
+  if (match && match !== 'blocked') {
+    savePersistedChain(title, year, chain);
+    return { chain, match };
+  }
+  if (match === 'blocked') {
+    savePersistedChain(title, year, chain);
+    return { chain, match: null };
+  }
+
+  // Non ancora coperto dall'albero conosciuto: prosegue SOLO da dove si era
+  // fermato (mai dalla radice), un salto alla volta, uscendo il prima
+  // possibile appena trovato un match.
+  let current = chain[chain.length - 1];
   while (chain.length < MAX_HOPS) {
     const candidates = (current.relations?.edges || [])
       .filter((e) => e.relationType === 'SEQUEL' && e.node && !visited.has(e.node.id))
@@ -341,6 +569,11 @@ async function walkSequelChain(title, year, seasonYearHint) {
         ? candidates[0]
         : candidates.find((n) => n.seasonYear === seasonYearHint) || candidates[0];
 
+    // Piccola pausa prima dell'hop successivo (vedi INTER_HOP_DELAY_MS sopra):
+    // riduce la probabilità di incappare nel burst limiter di AniList,
+    // invece di affidarsi solo al retry reattivo dopo un 429 già arrivato.
+    await sleep(INTER_HOP_DELAY_MS);
+
     // `chosen` arriva dal campo relations del nodo precedente, che include
     // solo un livello di relazioni: per continuare a camminare lungo la
     // catena serve un'altra piccola richiesta per id, che porta con sé le
@@ -351,9 +584,21 @@ async function walkSequelChain(title, year, seasonYearHint) {
     chain.push(next);
     visited.add(next.id);
     current = next;
+
+    const m = matchInChain(chain, target);
+    if (m) {
+      match = m === 'blocked' ? null : m;
+      break;
+    }
   }
 
-  return chain;
+  // Si salva l'albero raggiunto finora in ogni caso (anche se il target non
+  // è stato trovato): i nodi già scoperti restano comunque utili — es. se
+  // oggi si esce dalla catena senza trovare la Stagione 5 perché non ancora
+  // annunciata, i nodi fino alla Stagione 4 restano in cache, ed è solo
+  // l'eventuale nuovo salto verso la 5 che dovrà essere rifatto in futuro.
+  savePersistedChain(title, year, chain);
+  return { chain, match };
 }
 
 // Ricava, a partire dall'elenco delle stagioni TMDb (numero + conteggio
@@ -427,7 +672,9 @@ export async function resolveAnilistForSeason({ title, year, seasons, season, ep
     return fallback();
   }
 
-  const chain = await walkSequelChain(title, year, seasonYear);
+  const target = cumulativeEpisodeTarget(seasons, season, episode);
+  const { chain, match } = await resolveChainForTarget(title, year, seasonYear, target);
+
   if (!chain) {
     // Il titolo iniziale non è stato nemmeno trovato (errore di rete,
     // titolo non presente su AniList, oppure — il caso più comune — il
@@ -438,59 +685,22 @@ export async function resolveAnilistForSeason({ title, year, seasons, season, ep
     return fallback();
   }
 
-  const target = cumulativeEpisodeTarget(seasons, season, episode);
-
-  // Il filtro per formato si applica QUI, non durante l'attraversamento
-  // (walkSequelChain sopra): i nodi non-TV incontrati lungo il percorso
-  // (film, OVA, ONA, special) sono serviti solo da ponte per raggiungere la
-  // stagione TV successiva e non hanno una numerazione episodio comparabile
-  // con quella di TMDb, quindi non vanno né sommati né restituiti come
-  // risultato.
-  const tvNodes = chain.filter((n) => TV_FORMATS.has(n.format));
-
-  let cumulative = 0;
-  for (let i = 0; i < tvNodes.length; i++) {
-    const node = tvNodes[i];
-    const isLastKnown = i === tvNodes.length - 1;
-
-    if (node.episodes == null) {
-      // Il conteggio totale degli episodi non è ancora noto su AniList
-      // (stagione uscita da poco e ancora in corso). Se è l'ULTIMA
-      // stagione TV conosciuta della catena (nessun sequel successivo
-      // trovato finora), è anche l'unica candidata plausibile per
-      // qualunque episodio richiesto da qui in avanti: meglio restituirla
-      // come miglior risposta possibile piuttosto che rinunciare e tornare
-      // sempre alla prima stagione. Se invece ci sono altre stagioni TV
-      // dopo questa nella catena, il conteggio mancante ci impedisce di
-      // calcolare con certezza l'offset di quelle successive: qui sì,
-      // meglio il fallback.
-      if (isLastKnown) {
-        return {
-          anilistId: node.id,
-          malId: node.idMal ?? null,
-          title: node.title?.english || node.title?.romaji || title,
-        };
-      }
-      console.info('[Stream8 AniList] episodi del nodo sconosciuti (non ultimo della catena), fallback:', node.id, title);
-      return fallback();
-    }
-    if (target <= cumulative + node.episodes) {
-      return {
-        anilistId: node.id,
-        malId: node.idMal ?? null,
-        title: node.title?.english || node.title?.romaji || title,
-      };
-    }
-    cumulative += node.episodes;
+  if (!match) {
+    // La catena (eventualmente ripresa da quella salvata in locale) non
+    // copre l'episodio richiesto: incompleta, non ancora annunciata su
+    // AniList, o un nodo intermedio con episodi sconosciuti impedisce una
+    // somma affidabile oltre quel punto. Fallback di sicurezza.
+    console.info(
+      '[Stream8 AniList] catena non sufficiente a raggiungere la stagione richiesta, fallback:',
+      title,
+      `stagione=${season} episodio=${episode} target_cumulativo=${target} nodi_in_catena=${chain.length}`
+    );
+    return fallback();
   }
 
-  // La catena si è esaurita prima di raggiungere l'episodio richiesto
-  // (incompleta o il titolo non ha altri sequel TV su AniList): fallback
-  // di sicurezza.
-  console.info(
-    '[Stream8 AniList] catena esaurita prima di raggiungere la stagione richiesta, fallback:',
-    title,
-    `stagione=${season} episodio=${episode} target_cumulativo=${target} episodi_coperti=${cumulative}`
-  );
-  return fallback();
+  return {
+    anilistId: match.id,
+    malId: match.idMal ?? null,
+    title: match.title?.english || match.title?.romaji || title,
+  };
 }

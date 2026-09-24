@@ -30,6 +30,7 @@ import { useHistory } from '../context/HistoryContext';
 import WatchOnDialog from '../components/WatchOnDialog';
 import { MAINSTREAM_SEARCH_PATTERN } from '../utils/streamingServices';
 import { buildCustomUrl, pickPatternForItem } from '../utils/customConfigParser';
+import { clearPersistedAnilistChain } from '../api/anilist';
 
 // Alcuni titoli di episodi/stagioni sono molto lunghi (es. anime lunghi
 // come One Piece): questo stile evita che spezzino il layout del select,
@@ -59,6 +60,7 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
   const [season, setSeason] = useState(params.season || 1);
   const [episode, setEpisode] = useState(params.episode || 1);
   const [watchOpen, setWatchOpen] = useState(false);
+  const [anilistCacheMsg, setAnilistCacheMsg] = useState('');
   const latestSeasonRequest = useRef(params.season || 1);
 
   const isSeries = mediaType === 'tv' || mediaType === 'anime';
@@ -194,6 +196,18 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
 
   const closeWatchDialog = useCallback(() => setWatchOpen(false), []);
 
+  // Svuota l'albero AniList salvato in locale per QUESTO titolo (stessa
+  // chiave Titolo+Anno usata per calcolarlo in api/anilist.js): la prossima
+  // volta che si sceglie un servizio custom per un anime, verrà ricalcolato
+  // da zero. Utile ad es. se AniList ha corretto nel frattempo una
+  // relazione sbagliata tra le stagioni.
+  const handleClearAnilistCache = useCallback(() => {
+    const year = details.year ? Number(details.year) : undefined;
+    clearPersistedAnilistChain(details.title, year);
+    setAnilistCacheMsg(t(lang, 'anilist_cache_cleared'));
+    setTimeout(() => setAnilistCacheMsg(''), 3000);
+  }, [details.title, details.year, lang]);
+
   return (
     <Box>
       <Box sx={{ position: 'relative', width: '100%', height: { xs: 300, md: 440 }, overflow: 'hidden' }}>
@@ -270,7 +284,7 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
           </Typography>
         )}
 
-        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2, rowGap: 1 }}>
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.5, rowGap: 1 }}>
           {details.year && (
             <Typography variant="body2" color="text.secondary">
               {details.year}
@@ -294,10 +308,25 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
               {details.numberOfEpisodes} {t(lang, 'episodes_count')}
             </Typography>
           )}
-          {details.genreNames?.slice(0, 3).map((g) => (
-            <Chip key={g} label={g} size="small" variant="outlined" />
-          ))}
         </Stack>
+
+        {details.genreNames?.length > 0 && (
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2, rowGap: 1 }}>
+            {details.genreNames.map((g) => (
+              <Chip
+                key={g}
+                label={g}
+                size="small"
+                variant="outlined"
+                sx={{
+                  borderColor: 'divider',
+                  color: 'text.secondary',
+                  bgcolor: 'transparent',
+                }}
+              />
+            ))}
+          </Stack>
+        )}
 
         {loading && !details.overview ? (
           <>
@@ -426,6 +455,24 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
                 </Box>
               ))}
             </Box>
+          </Box>
+        )}
+
+        {details.mediaType === 'anime' && (
+          <Box sx={{ mt: 4, pt: 2, borderTop: '1px solid', borderColor: 'divider', textAlign: 'center' }}>
+            <Button
+              size="small"
+              color="inherit"
+              onClick={handleClearAnilistCache}
+              sx={{ color: 'text.secondary', textTransform: 'none', fontSize: '0.8rem' }}
+            >
+              {t(lang, 'anilist_cache_clear')}
+            </Button>
+            {anilistCacheMsg && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                {anilistCacheMsg}
+              </Typography>
+            )}
           </Box>
         )}
       </Container>
