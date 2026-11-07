@@ -1,7 +1,6 @@
-// Replace "YOUR_TMDB_TOKEN" with your actual TMDB Bearer Token
-const TMDB_TOKEN = 'YOUR_TMDB_TOKEN';
-
-const BASE_URL = 'https://api.themoviedb.org/3';
+// Le richieste passano dalla Pages Function /api/tmdb: il token TMDb resta
+// nei secret di Cloudflare e non viene mai inserito nel bundle del browser.
+const BASE_URL = '/api/tmdb';
 export const IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
 // --- Ottimizzazioni di rete -------------------------------------------
@@ -41,12 +40,7 @@ function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
 
 async function doFetch(cacheKey, attempt = 0) {
   try {
-    const res = await fetchWithTimeout(cacheKey, {
-      headers: {
-        Authorization: `Bearer ${TMDB_TOKEN}`,
-        'Content-Type': 'application/json;charset=utf-8',
-      },
-    });
+    const res = await fetchWithTimeout(cacheKey);
     if (!res.ok) {
       throw new Error(`Errore TMDb (${res.status})`);
     }
@@ -67,7 +61,7 @@ async function doFetch(cacheKey, attempt = 0) {
 }
 
 async function tmdbFetch(path, params = {}) {
-  const url = new URL(BASE_URL + path);
+  const url = new URL(BASE_URL + path, window.location.origin);
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') {
       url.searchParams.set(key, value);

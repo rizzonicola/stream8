@@ -29,12 +29,22 @@
 
 ## 🔑 TMDB Configuration
 
-Before running the application locally, insert your **The Movie Database (TMDB)** Bearer Token into `src/api/tmdb.js`:
+Stream8 never ships a TMDB token to the browser. In production, calls go to
+`/api/tmdb/*` and are handled by the Cloudflare Pages Function in
+`functions/api/tmdb/[[path]].js`, which reads the encrypted `TMDB_TOKEN`
+secret from the Pages project.
 
-```javascript
-const TMDB_TOKEN = "YOUR_TMDB_TOKEN";
+For local development:
 
-```
+1. Copy `.dev.vars.example` to `.dev.vars` and set your **TMDB v4 Read Access
+   Token** (the long token starting with `eyJ...`, not the v3 API key).
+2. Run `npm run dev:api` — starts the Pages Function locally on port `8788`.
+3. Run `npm run dev` in another terminal — Vite proxies `/api` to port `8788`.
+
+Never prefix the token with `VITE_`: Vite would inline it into the browser
+bundle. The production secret is configured in **Cloudflare Pages → Settings →
+Variables and Secrets → `TMDB_TOKEN` → Encrypt**.
+
 ## 🛠️ Getting Started
 ### Prerequisites
  * Node.js (v18 or higher)

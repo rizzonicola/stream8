@@ -1,11 +1,15 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// Stream8 - configurazione Vite. Applicazione 100% client-side.
+// Stream8 - configurazione Vite. Il frontend è statico; le chiamate TMDb
+// passano dalla Pages Function locale avviata con `npm run dev:api`.
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    proxy: {
+      '/api': 'http://127.0.0.1:8788',
+    },
   },
   build: {
     rollupOptions: {

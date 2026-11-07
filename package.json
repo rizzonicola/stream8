@@ -3,11 +3,14 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Stream8 - aggregatore e tracker di streaming personale, 100% client-side",
+  "description": "Stream8 - aggregatore e tracker di streaming personale",
   "scripts": {
     "dev": "vite",
+    "dev:api": "npx wrangler pages dev public --port 8788",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:pages": "npm run build && npx wrangler pages dev dist",
+    "test": "node --test"
   },
   "dependencies": {
     "@emotion/react": "^11.13.3",

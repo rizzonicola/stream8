@@ -14,7 +14,7 @@
 // v2). Senza questo passaggio gli utenti che hanno già installato la PWA
 // continuerebbero a vedere la shell precedente finché la cache non scade.
 
-const CACHE_NAME = 'stream8-shell-v2';
+const CACHE_NAME = 'stream8-shell-v3';
 
 // Risorse con nome file fisso, note in anticipo: precaricate subito
 // all'installazione per garantire il funzionamento offline fin da subito.
@@ -57,9 +57,11 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // Mai in cache: qualsiasi richiesta cross-origin (incluse le chiamate a
-  // api.themoviedb.org e image.tmdb.org) — restano sempre network-only.
+  // Mai in cache: qualsiasi richiesta cross-origin (incluse le immagini
+  // image.tmdb.org) e le chiamate API stessa origine (/api/*, che passano
+  // dalla Pages Function) restano sempre network-only.
   if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith('/api/')) return;
 
   // Navigazioni (cambi di pagina/route dell'app, SPA): prova sempre prima
   // la rete per avere l'ultima versione; se offline, ripiega sulla shell

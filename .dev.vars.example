@@ -1,0 +1,4 @@
+# Copia questo file in .dev.vars e inserisci il tuo token TMDb v4
+# (API Read Access Token, inizia con "eyJ...").
+# Non committare mai .dev.vars: è già in .gitignore.
+TMDB_TOKEN=YOUR_TMDB_TOKEN
