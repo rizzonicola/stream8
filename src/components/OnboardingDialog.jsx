@@ -6,20 +6,17 @@ import {
   DialogActions,
   Typography,
   Box,
-  FormGroup,
-  FormControlLabel,
-  Checkbox,
   Button,
   Divider,
-  Chip,
   Alert,
-  Avatar,
   Stack,
 } from '@mui/material';
-import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
+import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import { MAINSTREAM_SERVICES } from '../utils/streamingServices';
 import CustomConfigForm from './CustomConfigForm';
+import CustomServiceRow from './customConfig/CustomServiceRow';
 import ConfirmDeleteCustomDialog from './ConfirmDeleteCustomDialog';
+import ServiceChoiceGrid from './ui/ServiceChoiceGrid';
 import { t } from '../i18n';
 
 export default function OnboardingDialog({ open, lang, onComplete }) {
@@ -44,56 +41,51 @@ export default function OnboardingDialog({ open, lang, onComplete }) {
   return (
     <>
       <Dialog open={open} disableEscapeKeyDown fullWidth maxWidth="sm">
-        <DialogTitle sx={{ fontFamily: 'inherit', fontWeight: 800 }}>
-          {t(lang, 'onboarding_title')}
-        </DialogTitle>
+        <DialogTitle>{t(lang, 'onboarding_title')}</DialogTitle>
         <DialogContent dividers>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, lineHeight: 1.65 }}>
             {t(lang, 'onboarding_subtitle')}
           </Typography>
 
-          <Typography variant="overline" color="primary">
+          <Typography variant="overline" color="text.secondary" component="p" sx={{ mb: 1 }}>
             {t(lang, 'onboarding_mainstream')}
           </Typography>
-          <FormGroup sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5 }}>
-            {MAINSTREAM_SERVICES.map((svc) => (
-              <FormControlLabel
-                key={svc.id}
-                control={
-                  <Checkbox
-                    checked={selected.includes(svc.id)}
-                    onChange={() => toggleService(svc.id)}
-                  />
-                }
-                label={
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <Avatar sx={{ width: 20, height: 20, bgcolor: svc.color, fontSize: 10 }}>
-                      {svc.name[0]}
-                    </Avatar>
-                    <Typography variant="body2">{svc.name}</Typography>
-                  </Stack>
-                }
-              />
-            ))}
-          </FormGroup>
+          <ServiceChoiceGrid
+            services={MAINSTREAM_SERVICES}
+            selected={selected}
+            onToggle={toggleService}
+          />
 
-          <Divider sx={{ my: 2 }} />
+          <Divider sx={{ my: 2.5 }} />
 
-          <Typography variant="overline" color="primary">
-            {t(lang, 'onboarding_custom_add')}
+          <Typography variant="overline" color="text.secondary" component="p" sx={{ mb: 1 }}>
+            {t(lang, 'onboarding_custom_services')}
           </Typography>
 
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, my: 1 }}>
-            {customServices.map((c) => (
-              <Chip key={c.id} label={c.name} onDelete={() => setServiceToDelete(c)} />
-            ))}
-          </Box>
+          {customServices.length > 0 && (
+            <Stack
+              component="ul"
+              spacing={1}
+              sx={{ listStyle: 'none', p: 0, m: 0, my: 1.5 }}
+            >
+              {customServices.map((c) => (
+                <CustomServiceRow
+                  key={c.id}
+                  lang={lang}
+                  service={c}
+                  onDelete={setServiceToDelete}
+                  dense
+                />
+              ))}
+            </Stack>
+          )}
 
           {!showCustomForm ? (
             <Button
-              startIcon={<AddCircleOutlineIcon />}
+              variant="outlined"
+              startIcon={<AddRoundedIcon />}
               onClick={() => setShowCustomForm(true)}
-              sx={{ mt: 1 }}
+              sx={{ mt: customServices.length > 0 ? 0 : 1 }}
             >
               {t(lang, 'onboarding_custom_add')}
             </Button>
@@ -115,7 +107,7 @@ export default function OnboardingDialog({ open, lang, onComplete }) {
           )}
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button variant="contained" size="large" fullWidth onClick={handleConfirm}>
+          <Button variant="contained" size="large" onClick={handleConfirm}>
             {t(lang, 'onboarding_confirm')}
           </Button>
         </DialogActions>
@@ -125,6 +117,7 @@ export default function OnboardingDialog({ open, lang, onComplete }) {
         <ConfirmDeleteCustomDialog
           lang={lang}
           name={serviceToDelete.name}
+          baseUrl={serviceToDelete.baseUrl}
           onCancel={() => setServiceToDelete(null)}
           onConfirm={() => {
             setCustomServices((prev) => prev.filter((s) => s.id !== serviceToDelete.id));

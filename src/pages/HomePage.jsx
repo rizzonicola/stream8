@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Box, CircularProgress, Container } from '@mui/material';
+import { Box, Container, Skeleton } from '@mui/material';
 import HeroSlider from '../components/HeroSlider';
 import HistorySection from '../components/HistorySection';
 import HorizontalList from '../components/HorizontalList';
@@ -15,15 +15,15 @@ import {
   fetchRecommendedAnime,
 } from '../api/tmdb';
 
-// L'hero risale sotto la navbar flottante di esattamente la sua altezza
-// (padding + toolbar + padding). Su iPhone con notch/Dynamic Island quella
-// altezza cresce di env(safe-area-inset-top): senza tenerne conto qui,
-// l'hero risalirebbe troppo o troppo poco su quei dispositivi. Su
-// Android/desktop l'inset vale 0px, quindi il valore resta invariato.
+// L'hero risale sotto la navbar flottante di esattamente la sua altezza.
+// Su iPhone con notch/Dynamic Island quell'altezza cresce di
+// env(safe-area-inset-top): senza tenerne conto l'hero risalirebbe troppo.
 const NAVBAR_PULLUP = {
-  xs: 'calc(-76px - env(safe-area-inset-top, 0px))',
-  md: 'calc(-88px - env(safe-area-inset-top, 0px))',
+  xs: 'calc(-94px - env(safe-area-inset-top, 0px))',
+  md: 'calc(-106px - env(safe-area-inset-top, 0px))',
 };
+
+const GUTTER = { xs: 2, sm: 3, md: 4 };
 
 function interleave(...lists) {
   const max = Math.max(...lists.map((l) => l.length));
@@ -34,6 +34,41 @@ function interleave(...lists) {
     });
   }
   return out;
+}
+
+function HomeSkeleton() {
+  return (
+    <Box aria-busy="true">
+      <Box sx={{ mt: NAVBAR_PULLUP }}>
+        <Skeleton
+          variant="rectangular"
+          height={{ xs: 440, md: 540 }}
+          sx={{ borderRadius: 0 }}
+        />
+      </Box>
+      <Container maxWidth="xl" disableGutters sx={{ pt: 3.5 }}>
+        <Skeleton
+          variant="text"
+          width={220}
+          height={36}
+          sx={{ ml: GUTTER, mb: 2, maxWidth: '60%' }}
+        />
+        <Box sx={{ display: 'flex', gap: 2, px: GUTTER, overflow: 'hidden' }}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Box key={i} sx={{ width: { xs: 132, sm: 156 }, flexShrink: 0 }}>
+              <Skeleton
+                variant="rectangular"
+                height={{ xs: 198, sm: 234 }}
+                sx={{ borderRadius: '12px' }}
+              />
+              <Skeleton variant="text" width="82%" sx={{ mt: 1 }} />
+              <Skeleton variant="text" width="35%" />
+            </Box>
+          ))}
+        </Box>
+      </Container>
+    </Box>
+  );
 }
 
 export default function HomePage({ lang, view, onOpenDetail }) {
@@ -51,9 +86,8 @@ export default function HomePage({ lang, view, onOpenDetail }) {
     const tmdbLang = tmdbLangCode(lang);
 
     async function load() {
-      // Evita chiamate TMDb inutili: per le viste Film/Serie/Anime servono
-      // solo i dati di quella categoria (hero + sezione), non tutte e sei
-      // le liste come accadeva prima. Solo la vista Home le richiede tutte.
+      // Per le viste Film/Serie/Anime servono solo i dati di quella
+      // categoria (hero + sezione), non tutte e sei le liste.
       const needsMovies = view === VIEWS.HOME || view === VIEWS.MOVIES;
       const needsSeries = view === VIEWS.HOME || view === VIEWS.SERIES;
       const needsAnime = view === VIEWS.HOME || view === VIEWS.ANIME;
@@ -92,13 +126,7 @@ export default function HomePage({ lang, view, onOpenDetail }) {
     };
   }, [view, lang]);
 
-  if (loading) {
-    return (
-      <Box sx={{ mt: NAVBAR_PULLUP, display: 'flex', justifyContent: 'center', pt: '156px', pb: 10 }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
+  if (loading) return <HomeSkeleton />;
 
   return (
     <Box>
@@ -106,7 +134,7 @@ export default function HomePage({ lang, view, onOpenDetail }) {
         <HeroSlider lang={lang} items={heroItems} onSelect={onOpenDetail} />
       </Box>
 
-      <Container maxWidth="xl" disableGutters sx={{ pt: 3 }}>
+      <Container maxWidth="xl" disableGutters sx={{ pt: { xs: 2.5, sm: 3.5 }, pb: { xs: 6, sm: 8 } }}>
         <HistorySection
           lang={lang}
           history={groupedHistory}
@@ -116,6 +144,7 @@ export default function HomePage({ lang, view, onOpenDetail }) {
 
         {(view === VIEWS.HOME || view === VIEWS.MOVIES) && (
           <HorizontalList
+            lang={lang}
             title={t(lang, 'section_movies')}
             items={movies}
             onSelect={onOpenDetail}
@@ -123,6 +152,7 @@ export default function HomePage({ lang, view, onOpenDetail }) {
         )}
         {(view === VIEWS.HOME || view === VIEWS.SERIES) && (
           <HorizontalList
+            lang={lang}
             title={t(lang, 'section_series')}
             items={series}
             onSelect={onOpenDetail}
@@ -130,6 +160,7 @@ export default function HomePage({ lang, view, onOpenDetail }) {
         )}
         {(view === VIEWS.HOME || view === VIEWS.ANIME) && (
           <HorizontalList
+            lang={lang}
             title={t(lang, 'section_anime')}
             items={anime}
             onSelect={onOpenDetail}

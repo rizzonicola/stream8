@@ -216,7 +216,7 @@ function WatchOnDialog({
                   key={svc.id}
                   onClick={() => handlePickMainstream(svc)}
                   disabled={isUnavailable}
-                  sx={{ borderRadius: 2, mb: 0.5, opacity: isUnavailable ? 0.7 : 1 }}
+                  sx={{ borderRadius: '10px', mb: 0.5, opacity: isUnavailable ? 0.7 : 1 }}
                 >
                   <ListItemAvatar>{renderAvatar(svc, isUnavailable, false, svc.color)}</ListItemAvatar>
                   <ListItemText
@@ -235,7 +235,7 @@ function WatchOnDialog({
                   key={svc.id}
                   onClick={() => handlePickCustom(svc)}
                   disabled={isResolving}
-                  sx={{ borderRadius: 2, mb: 0.5 }}
+                  sx={{ borderRadius: '10px', mb: 0.5 }}
                 >
                   <ListItemAvatar>
                     {renderAvatar(svc, isUnavailable, isResolving, 'secondary.main')}

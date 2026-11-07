@@ -109,13 +109,13 @@ export default function SearchDialog({ open, lang, onClose, onSelect }) {
                   onSelect(item);
                   onClose();
                 }}
-                sx={{ borderRadius: 2, mb: 0.5 }}
+                sx={{ borderRadius: '8px', mb: 0.5 }}
               >
                 <ListItemAvatar>
                   <Avatar
                     variant="rounded"
                     src={posterUrl(item.posterPath, 'w92') || undefined}
-                    sx={{ width: 40, height: 56, borderRadius: 2 }}
+                    sx={{ width: 40, height: 56, borderRadius: '4px' }}
                   >
                     {item.title[0]}
                   </Avatar>

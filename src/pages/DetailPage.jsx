@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';import {
   Box,
   Container,
   Typography,
@@ -11,6 +10,7 @@ import {
   MenuItem,
   Avatar,
   Skeleton,
+  alpha,
 } from '@mui/material';
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded';
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded';
@@ -24,7 +24,6 @@ import {
   fetchSeasonEpisodes,
 } from '../api/tmdb';
 import { tmdbLangCode, t } from '../i18n';
-import { invertedCorner } from '../theme';
 import { useSettings } from '../context/SettingsContext';
 import { useHistory } from '../context/HistoryContext';
 import WatchOnDialog from '../components/WatchOnDialog';
@@ -136,6 +135,7 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
   };
 
   const backdrop = backdropUrl(details.backdropPath, 'w1280') || posterUrl(details.posterPath);
+  const poster = posterUrl(details.posterPath, 'w342');
 
   // Anno di uscita della stagione TMDb correntemente selezionata (dal primo
   // episodio disponibile): usato solo come "spareggio" quando la catena di
@@ -208,14 +208,51 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
     setTimeout(() => setAnilistCacheMsg(''), 3000);
   }, [details.title, details.year, lang]);
 
+  const metaItems = [];
+  if (details.year) {
+    metaItems.push({ key: 'year', node: <Typography variant="body2" color="text.secondary">{details.year}</Typography> });
+  }
+  if (runtimeLabel) {
+    metaItems.push({
+      key: 'runtime',
+      node: (
+        <Stack direction="row" spacing={0.5} alignItems="center">
+          <AccessTimeRoundedIcon sx={{ fontSize: 15, color: 'text.secondary' }} />
+          <Typography variant="body2" color="text.secondary">{runtimeLabel}</Typography>
+        </Stack>
+      ),
+    });
+  }
+  if (isSeries && details.numberOfSeasons) {
+    metaItems.push({
+      key: 'seasons',
+      node: (
+        <Typography variant="body2" color="text.secondary">
+          {details.numberOfSeasons} {t(lang, 'seasons_count')}
+        </Typography>
+      ),
+    });
+  }
+  if (isSeries && details.numberOfEpisodes) {
+    metaItems.push({
+      key: 'episodes',
+      node: (
+        <Typography variant="body2" color="text.secondary">
+          {details.numberOfEpisodes} {t(lang, 'episodes_count')}
+        </Typography>
+      ),
+    });
+  }
+
   return (
     <Box>
-      <Box sx={{ position: 'relative', width: '100%', height: { xs: 300, md: 440 }, overflow: 'hidden' }}>
+      <Box sx={{ position: 'relative', width: '100%', height: { xs: 320, md: 420 }, overflow: 'hidden' }}>
         {backdrop && (
           <Box
             component="img"
             src={backdrop}
             alt=""
+            aria-hidden
             sx={{
               position: 'absolute',
               inset: 0,
@@ -226,26 +263,33 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
           />
         )}
         <Box
+          aria-hidden
           sx={{
             position: 'absolute',
             inset: 0,
-            background: (theme) =>
-              theme.palette.mode === 'dark'
-                ? 'linear-gradient(0deg, rgba(20,24,26,1) 10%, rgba(20,24,26,0.5) 65%, rgba(20,24,26,0.1) 100%)'
-                : 'linear-gradient(0deg, rgba(247,245,241,1) 10%, rgba(247,245,241,0.55) 65%, rgba(247,245,241,0.1) 100%)',
+            background: (theme) => {
+              const base = theme.palette.background.default;
+              return [
+                `linear-gradient(0deg, ${base} 0%, ${alpha(base, 0.9)} 20%, ${alpha(base, 0.45)} 52%, transparent 82%)`,
+                `linear-gradient(180deg, ${alpha(base, 0.28)} 0%, transparent 24%)`,
+              ].join(', ');
+            },
           }}
         />
         <IconButton
           onClick={onBack}
-          aria-label={t(lang, 'close')}
+          aria-label={t(lang, 'a11y_back')}
           sx={{
             position: 'absolute',
             top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
-            left: 16,
-            bgcolor: 'rgba(10,14,13,0.5)',
+            left: { xs: 16, md: 24 },
+            width: 44,
+            height: 44,
+            bgcolor: 'rgba(10, 14, 13, 0.5)',
             color: '#fff',
-            backdropFilter: 'blur(6px)',
-            '&:hover': { bgcolor: 'rgba(10,14,13,0.7)' },
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255, 255, 255, 0.18)',
+            '&:hover': { bgcolor: 'rgba(10, 14, 13, 0.7)' },
           }}
         >
           <ArrowBackRoundedIcon />
@@ -254,12 +298,12 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
         {details.voteAverage > 0 && (
           <Box
             sx={{
-              ...invertedCorner(12),
               position: 'absolute',
               top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
-              right: 16,
-              px: 1.5,
-              py: 0.75,
+              right: { xs: 16, md: 24 },
+              px: 1.25,
+              py: 0.5,
+              borderRadius: '8px',
               bgcolor: 'primary.main',
               color: 'primary.contrastText',
               display: 'flex',
@@ -267,80 +311,117 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
               gap: 0.5,
             }}
           >
-            <StarRoundedIcon sx={{ fontSize: 18 }} />
-            <Typography variant="subtitle2" fontWeight={800}>
+            <StarRoundedIcon sx={{ fontSize: 17 }} />
+            <Typography variant="subtitle2" fontWeight={700}>
               {details.voteAverage.toFixed(1)}
             </Typography>
           </Box>
         )}
       </Box>
 
-      <Container maxWidth="md" sx={{ mt: { xs: -5, md: -8 }, position: 'relative', pb: 6 }}>
-        {loading && !details.title ? (
-          <Skeleton variant="text" width="70%" height={56} sx={{ mb: 1 }} />
-        ) : (
-          <Typography variant="h3" sx={{ fontWeight: 800, fontSize: { xs: 28, md: 40 }, mb: 1 }}>
-            {details.title}
-          </Typography>
-        )}
-
-        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.5, rowGap: 1 }}>
-          {details.year && (
-            <Typography variant="body2" color="text.secondary">
-              {details.year}
-            </Typography>
+      <Container maxWidth="md" sx={{ mt: { xs: -4, md: -7 }, position: 'relative', pb: 6 }}>
+        <Stack direction="row" spacing={{ sm: 3, md: 4 }} alignItems="flex-start">
+          {poster && (
+            <Box
+              component="img"
+              src={poster}
+              alt=""
+              aria-hidden
+              sx={{
+                display: { xs: 'none', sm: 'block' },
+                width: { sm: 150, md: 180 },
+                flexShrink: 0,
+                aspectRatio: '2 / 3',
+                objectFit: 'cover',
+                borderRadius: '10px',
+                border: '1px solid',
+                borderColor: 'divider',
+                boxShadow: (theme) =>
+                  theme.palette.mode === 'dark'
+                    ? '0 18px 40px -24px rgba(0, 0, 0, 0.9)'
+                    : '0 18px 40px -28px rgba(20, 24, 26, 0.45)',
+              }}
+            />
           )}
-          {runtimeLabel && (
-            <Stack direction="row" spacing={0.4} alignItems="center">
-              <AccessTimeRoundedIcon sx={{ fontSize: 15, color: 'text.secondary' }} />
-              <Typography variant="body2" color="text.secondary">
-                {runtimeLabel}
+
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            {loading && !details.title ? (
+              <Skeleton variant="text" width="70%" height={56} sx={{ mb: 1 }} />
+            ) : (
+              <Typography variant="h3" sx={{ fontSize: { xs: 30, md: 42 }, mb: 1 }}>
+                {details.title}
               </Typography>
-            </Stack>
-          )}
-          {isSeries && details.numberOfSeasons && (
-            <Typography variant="body2" color="text.secondary">
-              {details.numberOfSeasons} {t(lang, 'seasons_count')}
-            </Typography>
-          )}
-          {isSeries && details.numberOfEpisodes && (
-            <Typography variant="body2" color="text.secondary">
-              {details.numberOfEpisodes} {t(lang, 'episodes_count')}
-            </Typography>
-          )}
+            )}
+
+            {metaItems.length > 0 && (
+              <Stack
+                direction="row"
+                spacing={1}
+                alignItems="center"
+                flexWrap="wrap"
+                useFlexGap
+                sx={{ mb: 1.5, rowGap: 0.75 }}>
+                {metaItems.map((item, index) => (
+                  <Fragment key={item.key}>
+                    {index > 0 && (
+                      <Box
+                        aria-hidden
+                        sx={{
+                          width: 3,
+                          height: 3,
+                          borderRadius: '50%',
+                          bgcolor: 'text.disabled',
+                          flexShrink: 0,
+                        }}
+                      />
+                    )}
+                    {item.node}
+                  </Fragment>
+                ))}
+              </Stack>
+            )}
+
+            {details.genreNames?.length > 0 && (
+              <Stack
+                direction="row"
+                spacing={1}
+                flexWrap="wrap"
+                useFlexGap
+                sx={{ mb: 2, rowGap: 1 }}>
+                {details.genreNames.map((g) => (
+                  <Chip
+                    key={g}
+                    label={g}
+                    size="small"
+                    variant="outlined"
+                    sx={{
+                      borderColor: 'divider',
+                      color: 'text.secondary',
+                      bgcolor: 'transparent',
+                    }}
+                  />
+                ))}
+              </Stack>
+            )}
+
+            {loading && !details.overview ? (
+              <>
+                <Skeleton variant="text" width="100%" />
+                <Skeleton variant="text" width="90%" />
+                <Skeleton variant="text" width="60%" sx={{ mb: 3 }} />
+              </>
+            ) : (
+              details.overview && (
+                <Typography
+                  variant="body1"
+                  color="text.secondary"
+                  sx={{ mb: 3, maxWidth: '68ch', lineHeight: 1.7 }}>
+                  {details.overview}
+                </Typography>
+              )
+            )}
+          </Box>
         </Stack>
-
-        {details.genreNames?.length > 0 && (
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2, rowGap: 1 }}>
-            {details.genreNames.map((g) => (
-              <Chip
-                key={g}
-                label={g}
-                size="small"
-                variant="outlined"
-                sx={{
-                  borderColor: 'divider',
-                  color: 'text.secondary',
-                  bgcolor: 'transparent',
-                }}
-              />
-            ))}
-          </Stack>
-        )}
-
-        {loading && !details.overview ? (
-          <>
-            <Skeleton variant="text" width="100%" />
-            <Skeleton variant="text" width="90%" />
-            <Skeleton variant="text" width="60%" sx={{ mb: 3 }} />
-          </>
-        ) : (
-          details.overview && (
-            <Typography variant="body1" color="text.secondary" sx={{ mb: 3, maxWidth: 720 }}>
-              {details.overview}
-            </Typography>
-          )
-        )}
 
         {isSeries && seasons.length > 0 && (
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 3 }}>

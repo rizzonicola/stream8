@@ -9,7 +9,7 @@ import { t } from '../i18n';
 export default function ImportSettingsDialog({ open, lang, onConfirm, onDecline }) {
   return (
     <Dialog open={open} disableEscapeKeyDown fullWidth maxWidth="sm">
-      <DialogTitle sx={{ fontWeight: 800 }}>{t(lang, 'import_settings_title')}</DialogTitle>
+      <DialogTitle>{t(lang, 'import_settings_title')}</DialogTitle>
       <DialogContent dividers>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
           {t(lang, 'import_settings_body')}
@@ -17,10 +17,16 @@ export default function ImportSettingsDialog({ open, lang, onConfirm, onDecline 
         <Alert severity="info">{t(lang, 'import_settings_note')}</Alert>
       </DialogContent>
       <DialogActions sx={{ p: 2, flexDirection: { xs: 'column', sm: 'row' }, gap: 1 }}>
-        <Button fullWidth variant="outlined" onClick={onDecline}>
+        <Button
+          variant="outlined"
+          onClick={onDecline}
+          sx={{ width: { xs: '100%', sm: 'auto' } }}>
           {t(lang, 'import_settings_decline')}
         </Button>
-        <Button fullWidth variant="contained" onClick={onConfirm}>
+        <Button
+          variant="contained"
+          onClick={onConfirm}
+          sx={{ width: { xs: '100%', sm: 'auto' } }}>
           {t(lang, 'import_settings_accept')}
         </Button>
       </DialogActions>

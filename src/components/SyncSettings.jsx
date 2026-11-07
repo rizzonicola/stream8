@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Box,
   Typography,
-  Switch,
-  FormControlLabel,
   TextField,
   Button,
   Stack,
@@ -12,6 +10,7 @@ import {
 } from '@mui/material';
 import SyncRoundedIcon from '@mui/icons-material/SyncRounded';
 import { checkSyncServer, SyncError } from '../api/syncClient';
+import ToggleRow from './ui/ToggleRow';
 import { t } from '../i18n';
 
 /**
@@ -63,18 +62,15 @@ export default function SyncSettings({ lang, sync, onUpdateSync, syncing, onSync
 
   return (
     <Box>
-      <FormControlLabel
-        control={
-          <Switch checked={sync.enabled} onChange={(e) => handleToggleEnabled(e.target.checked)} />
-        }
+      <ToggleRow
         label={t(lang, 'settings_sync_enable_label')}
+        description={t(lang, 'settings_sync_note')}
+        checked={sync.enabled}
+        onChange={handleToggleEnabled}
       />
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, mb: 2 }}>
-        {t(lang, 'settings_sync_note')}
-      </Typography>
 
       {sync.enabled && (
-        <Stack spacing={1.5}>
+        <Stack spacing={1.5} sx={{ mt: 2 }}>
           <TextField
             size="small"
             label={t(lang, 'settings_sync_server_url')}
@@ -119,14 +115,10 @@ export default function SyncSettings({ lang, sync, onUpdateSync, syncing, onSync
           </Stack>
 
           {sync.serverUrl && sync.apiKey && (
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={sync.autoSync}
-                  onChange={(e) => onUpdateSync({ autoSync: e.target.checked })}
-                />
-              }
+            <ToggleRow
               label={t(lang, 'settings_sync_auto_label')}
+              checked={sync.autoSync}
+              onChange={(checked) => onUpdateSync({ autoSync: checked })}
             />
           )}
 

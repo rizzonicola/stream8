@@ -17,7 +17,7 @@ export default function ConsentDialog({ open, lang, onChoose }) {
 
   return (
     <Dialog open={open} disableEscapeKeyDown fullWidth maxWidth="sm">
-      <DialogTitle sx={{ fontWeight: 800 }}>{t(lang, 'consent_title')}</DialogTitle>
+      <DialogTitle>{t(lang, 'consent_title')}</DialogTitle>
       <DialogContent dividers>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
           {t(lang, 'consent_body')}
@@ -38,7 +38,7 @@ export default function ConsentDialog({ open, lang, onChoose }) {
             sx={{
               mt: 1.5,
               p: 2,
-              borderRadius: 2,
+              borderRadius: '12px',
               bgcolor: 'action.hover',
               whiteSpace: 'pre-line',
             }}
@@ -50,10 +50,16 @@ export default function ConsentDialog({ open, lang, onChoose }) {
         </Collapse>
       </DialogContent>
       <DialogActions sx={{ p: 2, flexDirection: { xs: 'column', sm: 'row' }, gap: 1 }}>
-        <Button fullWidth variant="outlined" onClick={() => onChoose(false)}>
+        <Button
+          variant="outlined"
+          onClick={() => onChoose(false)}
+          sx={{ width: { xs: '100%', sm: 'auto' } }}>
           {t(lang, 'consent_decline')}
         </Button>
-        <Button fullWidth variant="contained" onClick={() => onChoose(true)}>
+        <Button
+          variant="contained"
+          onClick={() => onChoose(true)}
+          sx={{ width: { xs: '100%', sm: 'auto' } }}>
           {t(lang, 'consent_accept')}
         </Button>
       </DialogActions>

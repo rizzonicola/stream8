@@ -9,6 +9,7 @@ function HistorySection({ lang, history, onSelect, onRemove }) {
 
   return (
     <HorizontalList
+      lang={lang}
       title={t(lang, 'section_history')}
       items={history}
       onSelect={onSelect}

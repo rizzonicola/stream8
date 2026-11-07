@@ -21,6 +21,7 @@ const DetailPage = lazy(() => import('./pages/DetailPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const InfoPage = lazy(() => import('./pages/InfoPage'));
 const HistoryPage = lazy(() => import('./pages/HistoryPage'));
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 function PageLoader() {
   return (
@@ -30,10 +31,10 @@ function PageLoader() {
   );
 }
 
-function pathToView(path) {
-  if (path.startsWith(ROUTES.MOVIES)) return VIEWS.MOVIES;
-  if (path.startsWith(ROUTES.SERIES)) return VIEWS.SERIES;
-  if (path.startsWith(ROUTES.ANIME)) return VIEWS.ANIME;
+function pathToView(pathname) {
+  if (pathname === ROUTES.MOVIES) return VIEWS.MOVIES;
+  if (pathname === ROUTES.SERIES) return VIEWS.SERIES;
+  if (pathname === ROUTES.ANIME) return VIEWS.ANIME;
   return VIEWS.HOME;
 }
 
@@ -111,16 +112,46 @@ function AppShell() {
   }, [activeTheme]);
 
   const detailParams = parseDetailPath(path);
-  const isSettings = path === ROUTES.SETTINGS;
-  const isInfo = path === ROUTES.INFO;
-  const isHistory = path === ROUTES.HISTORY;
-  const view = pathToView(path);
+  const pathname = path.split('?')[0].replace(/\/+$/, '') || ROUTES.HOME;
+  const isSettings = pathname === ROUTES.SETTINGS;
+  const isInfo = pathname === ROUTES.INFO;
+  const isHistory = pathname === ROUTES.HISTORY;
+  const isImportRoute = pathname === ROUTES.IMPORT_SETTINGS;
+
+  // Le tab di contenuto (Home/Film/Serie/Anime) devono risultare selezionate
+  // solo quando siamo davvero su una di quelle viste. Su Impostazioni, Info,
+  // Cronologia e 404 nessuna tab deve restare attiva: altrimenti MUI
+  // considera Home già selezionata e ignora il click che dovrebbe riportare
+  // alla Home.
+  const isHome = pathname === ROUTES.HOME;
+  const isMovies = pathname === ROUTES.MOVIES;
+  const isSeries = pathname === ROUTES.SERIES;
+  const isAnime = pathname === ROUTES.ANIME;
+  const isContentRoute = isHome || isMovies || isSeries || isAnime;
+  const isKnownRoute =
+    isContentRoute ||
+    isSettings ||
+    isInfo ||
+    isHistory ||
+    isImportRoute ||
+    Boolean(detailParams);
+
+  const view = isContentRoute ? pathToView(pathname) : VIEWS.HOME;
+  const activeView = isContentRoute ? view : undefined;
+  const activePage = isSettings
+    ? 'settings'
+    : isInfo
+      ? 'info'
+      : isHistory
+        ? 'history'
+        : undefined;
 
   const openDetail = useCallback((item) => navigate(detailPath(item), item), [navigate]);
   const changeView = useCallback((v) => navigate(VIEW_TO_ROUTE[v]), [navigate]);
   const openSettings = useCallback(() => navigate(ROUTES.SETTINGS), [navigate]);
   const openInfo = useCallback(() => navigate(ROUTES.INFO), [navigate]);
   const openHistory = useCallback(() => navigate(ROUTES.HISTORY), [navigate]);
+  const goHome = useCallback(() => navigate(ROUTES.HOME), [navigate]);
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const goBack = useCallback(() => window.history.back(), []);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
@@ -165,6 +196,7 @@ function AppShell() {
     if (isSettings) return <SettingsPage lang={lang} />;
     if (isInfo) return <InfoPage lang={lang} />;
     if (isHistory) return <HistoryPage lang={lang} onOpenDetail={openDetail} />;
+    if (!isKnownRoute) return <NotFoundPage lang={lang} onGoHome={goHome} />;
     return <HomePage lang={lang} view={view} onOpenDetail={openDetail} />;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, lang]);
@@ -209,7 +241,8 @@ function AppShell() {
           {showNavBar && (
             <NavBar
               lang={lang}
-              activeView={view}
+              activeView={activeView}
+              activePage={activePage}
               onChangeView={changeView}
               onOpenSettings={openSettings}
               onOpenInfo={openInfo}
