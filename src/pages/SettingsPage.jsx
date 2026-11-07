@@ -9,7 +9,6 @@ import {
   Checkbox,
   Divider,
   Stack,
-  Chip,
   Avatar,
   RadioGroup,
   Radio,
@@ -25,8 +24,10 @@ import {
   DialogActions,
   TextField,
   InputAdornment,
+  IconButton,
 } from '@mui/material';
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
+import EditRoundedIcon from '@mui/icons-material/EditRounded';
 import IosShareRoundedIcon from '@mui/icons-material/IosShareRounded';
 import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded';
 import { useSettings } from '../context/SettingsContext';
@@ -34,18 +35,30 @@ import { useConsent } from '../context/ConsentContext';
 import { useHistory } from '../context/HistoryContext';
 import { MAINSTREAM_SERVICES } from '../utils/streamingServices';
 import CustomConfigForm from '../components/CustomConfigForm';
+import EditCustomServiceDialog from '../components/EditCustomServiceDialog';
+import ConfirmDeleteCustomDialog from '../components/ConfirmDeleteCustomDialog';
 import SyncSettings from '../components/SyncSettings';
 import { buildShareUrl } from '../utils/shareSettings';
 import { t, SUPPORTED_LANGS } from '../i18n';
 
 export default function SettingsPage({ lang }) {
-  const { settings, updateMainstream, addCustomService, removeCustomService, setTheme, setLanguage, updateSync } =
-    useSettings();
+  const {
+    settings,
+    updateMainstream,
+    addCustomService,
+    updateCustomService,
+    removeCustomService,
+    setTheme,
+    setLanguage,
+    updateSync,
+  } = useSettings();
   const { historyEnabled, setHistoryConsent } = useConsent();
   const { syncing, syncNow } = useHistory();
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
   const [copied, setCopied] = useState(false);
+  const [editingService, setEditingService] = useState(null);
+  const [serviceToDelete, setServiceToDelete] = useState(null);
 
   const toggleMainstream = (id) => {
     const set = new Set(settings.selectedMainstream);
@@ -109,16 +122,59 @@ export default function SettingsPage({ lang }) {
         <Typography variant="subtitle2" sx={{ mb: 1 }}>
           {t(lang, 'settings_custom_reload')}
         </Typography>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-          {settings.customServices.map((c) => (
-            <Chip
-              key={c.id}
-              label={c.name}
-              onDelete={() => removeCustomService(c.id)}
-              deleteIcon={<DeleteOutlineRoundedIcon />}
-            />
-          ))}
-        </Box>
+        {settings.customServices.length === 0 ? (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {t(lang, 'settings_custom_empty')}
+          </Typography>
+        ) : (
+          <Stack spacing={1} sx={{ mb: 2 }}>
+            {settings.customServices.map((c) => (
+              <Paper
+                key={c.id}
+                variant="outlined"
+                sx={{
+                  px: 1.5,
+                  py: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  borderRadius: 1.5,
+                }}
+              >
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
+                    {c.name}
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    noWrap
+                    sx={{ display: 'block' }}
+                  >
+                    {c.baseUrl}
+                  </Typography>
+                </Box>
+                <IconButton
+                  size="small"
+                  title={t(lang, 'settings_custom_edit')}
+                  aria-label={t(lang, 'settings_custom_edit')}
+                  onClick={() => setEditingService(c)}
+                >
+                  <EditRoundedIcon fontSize="small" />
+                </IconButton>
+                <IconButton
+                  size="small"
+                  color="error"
+                  title={t(lang, 'settings_custom_delete')}
+                  aria-label={t(lang, 'settings_custom_delete')}
+                  onClick={() => setServiceToDelete(c)}
+                >
+                  <DeleteOutlineRoundedIcon fontSize="small" />
+                </IconButton>
+              </Paper>
+            ))}
+          </Stack>
+        )}
 
         <CustomConfigForm lang={lang} onAdd={addCustomService} />
       </Paper>
@@ -231,6 +287,30 @@ export default function SettingsPage({ lang }) {
           <Button onClick={() => setShareOpen(false)}>{t(lang, 'share_settings_close')}</Button>
         </DialogActions>
       </Dialog>
+
+      {editingService && (
+        <EditCustomServiceDialog
+          lang={lang}
+          service={editingService}
+          onClose={() => setEditingService(null)}
+          onSave={(updated) => {
+            updateCustomService(updated);
+            setEditingService(null);
+          }}
+        />
+      )}
+
+      {serviceToDelete && (
+        <ConfirmDeleteCustomDialog
+          lang={lang}
+          name={serviceToDelete.name}
+          onCancel={() => setServiceToDelete(null)}
+          onConfirm={() => {
+            removeCustomService(serviceToDelete.id);
+            setServiceToDelete(null);
+          }}
+        />
+      )}
     </Container>
   );
 }

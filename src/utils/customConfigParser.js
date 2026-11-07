@@ -63,6 +63,28 @@ export function parseCustomConfig(jsonText) {
   };
 }
 
+// Serializza una configurazione già validata nel formato JSON leggibile
+// usato dall'editor e dal download: stesso schema del file originale, con
+// indentazione a 2 spazi e newline finale.
+export function serializeCustomConfig(config) {
+  return `${JSON.stringify(config, null, 2)}\n`;
+}
+
+// Scarica un file JSON sul dispositivo dell'utente. Usato dall'editor delle
+// configurazioni personalizzate per esportare il JSON anche quando in
+// origine era stato caricato da un file o da un link.
+export function downloadJsonFile(filename, jsonText) {
+  const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function readJsonFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

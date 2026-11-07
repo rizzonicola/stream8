@@ -83,6 +83,14 @@ export function SettingsProvider({ children }) {
     (service) => setSettings((s) => ({ ...s, customServices: [...s.customServices, service] })),
     []
   );
+  const updateCustomService = useCallback(
+    (service) =>
+      setSettings((s) => ({
+        ...s,
+        customServices: s.customServices.map((c) => (c.id === service.id ? service : c)),
+      })),
+    []
+  );
   const removeCustomService = useCallback(
     (id) =>
       setSettings((s) => ({
@@ -125,6 +133,7 @@ export function SettingsProvider({ children }) {
       completeOnboarding,
       updateMainstream,
       addCustomService,
+      updateCustomService,
       removeCustomService,
       setTheme,
       setLanguage,
@@ -136,6 +145,7 @@ export function SettingsProvider({ children }) {
       completeOnboarding,
       updateMainstream,
       addCustomService,
+      updateCustomService,
       removeCustomService,
       setTheme,
       setLanguage,
