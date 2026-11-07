@@ -1,66 +1,64 @@
 // Le richieste passano dalla Pages Function /api/tmdb: il token TMDb resta
 // nei secret di Cloudflare e non viene mai inserito nel bundle del browser.
+import { LruCache } from '../utils/lruCache';
+
 const BASE_URL = '/api/tmdb';
-export const IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
 // --- Ottimizzazioni di rete -------------------------------------------
-// 1) Cache in memoria (5 min, mai su disco): evita richieste duplicate per
-//    la stessa risorsa nella stessa sessione (es. tornando su Home dopo
-//    aver visitato Film/Serie/Anime, o riaprendo lo stesso titolo).
-// 2) Deduplica delle richieste "in volo": se la stessa URL viene richiesta
-//    più volte prima che la prima risposta arrivi (tipico quando più
-//    componenti montano insieme, es. Promise.all in Home), viene fatta
-//    una sola vera richiesta di rete e il risultato condiviso.
+// 1) Cache in memoria (5 min, mai su disco) con limite rigido: evita
+//    richieste duplicate nella stessa sessione senza crescere all'infinito.
+// 2) Deduplica delle richieste "in volo" per le chiamate senza AbortSignal.
+//    Le ricerche annullabili restano indipendenti: abortire una richiesta
+//    condivisa farebbe fallire anche gli altri chiamanti.
 // 3) Timeout (10s) via AbortController, per non restare bloccati su reti
 //    lente o cadute.
 // 4) Un solo retry automatico con breve backoff sugli errori di rete
 //    transitori (non sugli errori HTTP 4xx/5xx espliciti del server).
-const responseCache = new Map(); // url -> { data, expiry }
+const responseCache = new LruCache(200);
 const inFlightRequests = new Map(); // url -> Promise
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 10_000;
-const MAX_CACHE_ENTRIES = 200; // limite morbido: una scheda tenuta aperta per ore/giorni non deve accumulare voci scadute all'infinito
-
-// Rimuove le voci scadute quando la cache cresce oltre la soglia, invece di
-// tenerla sotto controllo con un timer separato (che girerebbe anche
-// quando l'app è in background, sprecando risorse per nulla).
-function pruneExpiredCache() {
-  if (responseCache.size <= MAX_CACHE_ENTRIES) return;
-  const now = Date.now();
-  for (const [key, entry] of responseCache) {
-    if (entry.expiry <= now) responseCache.delete(key);
-  }
-}
 
 function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+  const external = options.signal;
+  const onAbort = () => controller.abort();
+  if (external) {
+    if (external.aborted) controller.abort();
+    else external.addEventListener('abort', onAbort, { once: true });
+  }
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => {
+    clearTimeout(timer);
+    external?.removeEventListener?.('abort', onAbort);
+  });
 }
 
-async function doFetch(cacheKey, attempt = 0) {
+async function doFetch(url, signal, attempt = 0) {
   try {
-    const res = await fetchWithTimeout(cacheKey);
+    const res = await fetchWithTimeout(url, { signal });
     if (!res.ok) {
       throw new Error(`Errore TMDb (${res.status})`);
     }
     return await res.json();
   } catch (err) {
+    // L'utente ha annullato (nuova query o dialog chiuso): nessun retry.
+    if (signal?.aborted) throw err;
     // Solo un retry, solo per errori di rete/timeout (non per risposte
     // HTTP esplicite come 404/429, che non trarrebbero beneficio da un
     // secondo tentativo immediato).
     const isNetworkIssue = err.name === 'AbortError' || err instanceof TypeError;
     if (isNetworkIssue && attempt < 1) {
-      console.warn('[Stream8 TMDb] tentativo', attempt + 1, 'fallito, riprovo:', cacheKey, err.message);
+      console.warn('[Stream8 TMDb] tentativo', attempt + 1, 'fallito, riprovo:', url, err.message);
       await new Promise((resolve) => setTimeout(resolve, 400));
-      return doFetch(cacheKey, attempt + 1);
+      return doFetch(url, signal, attempt + 1);
     }
-    console.error('[Stream8 TMDb] richiesta fallita definitivamente:', cacheKey, err);
+    console.error('[Stream8 TMDb] richiesta fallita definitivamente:', url, err);
     throw err;
   }
 }
 
-async function tmdbFetch(path, params = {}) {
+async function tmdbFetch(path, params = {}, { signal } = {}) {
   const url = new URL(BASE_URL + path, window.location.origin);
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') {
@@ -70,43 +68,22 @@ async function tmdbFetch(path, params = {}) {
   const cacheKey = url.toString();
 
   const cached = responseCache.get(cacheKey);
-  if (cached && cached.expiry > Date.now()) {
-    return cached.data;
-  }
+  if (cached !== undefined) return cached;
 
-  const pending = inFlightRequests.get(cacheKey);
+  const pending = signal ? null : inFlightRequests.get(cacheKey);
   if (pending) return pending;
 
-  const request = doFetch(cacheKey)
+  const request = doFetch(cacheKey, signal)
     .then((data) => {
-      responseCache.set(cacheKey, { data, expiry: Date.now() + CACHE_TTL_MS });
-      pruneExpiredCache();
+      responseCache.set(cacheKey, data, CACHE_TTL_MS);
       return data;
     })
     .finally(() => {
-      inFlightRequests.delete(cacheKey);
+      if (!signal) inFlightRequests.delete(cacheKey);
     });
 
-  inFlightRequests.set(cacheKey, request);
+  if (!signal) inFlightRequests.set(cacheKey, request);
   return request;
-}
-
-export function posterUrl(path, size = 'w500') {
-  return path ? `${IMAGE_BASE}/${size}${path}` : null;
-}
-
-// Genera un srcset per le locandine: il browser sceglie automaticamente la
-// variante più piccola sufficiente per lo spazio disponibile, risparmiando
-// banda soprattutto su mobile (dove le card sono strette).
-export function posterSrcSet(path) {
-  if (!path) return undefined;
-  return [92, 154, 185, 342]
-    .map((w) => `${IMAGE_BASE}/w${w}${path} ${w}w`)
-    .join(', ');
-}
-
-export function backdropUrl(path, size = 'w1280') {
-  return path ? `${IMAGE_BASE}/${size}${path}` : null;
 }
 
 // Normalizza un risultato movie/tv TMDb in un formato comune usato dall'app
@@ -201,8 +178,8 @@ export async function fetchRecentAnimeForHero(lang) {
   return (data.results || []).map((r) => normalizeItem(r, 'anime'));
 }
 
-export async function searchMulti(query, lang) {
-  const data = await tmdbFetch('/search/multi', { query, language: lang });
+export async function searchMulti(query, lang, options = {}) {
+  const data = await tmdbFetch('/search/multi', { query, language: lang }, options);
   return (data.results || [])
     .filter((r) => r.media_type === 'movie' || r.media_type === 'tv')
     .map((r) => {

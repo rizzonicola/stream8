@@ -13,8 +13,9 @@ import { t } from '../i18n';
 
 const GUTTER = { xs: 2, sm: 3, md: 4 };
 
-function HorizontalList({ lang, title, items, onSelect, onRemove, removeLabel }) {
+function HorizontalList({ lang, title, items, onSelect, onRemove, removeLabel, onPrefetch }) {
   const scrollerRef = useRef(null);
+  const scrollStateRef = useRef({ left: false, right: false });
   const headingId = useId();
   const [canScroll, setCanScroll] = useState({ left: false, right: false });
   const isDesktop = useMediaQuery('(min-width:600px)');
@@ -24,10 +25,17 @@ function HorizontalList({ lang, title, items, onSelect, onRemove, removeLabel })
     const el = scrollerRef.current;
     if (!el) return;
     const max = el.scrollWidth - el.clientWidth;
-    setCanScroll({
+    const next = {
       left: el.scrollLeft > 4,
       right: el.scrollLeft < max - 4,
-    });
+    };
+    // Aggiorna lo stato React solo quando le frecce cambiano davvero:
+    // altrimenti ogni evento di scroll (anche di 1px) farebbe ri-renderizzare
+    // l'intera lista.
+    const prev = scrollStateRef.current;
+    if (prev.left === next.left && prev.right === next.right) return;
+    scrollStateRef.current = next;
+    setCanScroll(next);
   }, []);
 
   useEffect(() => {
@@ -133,7 +141,14 @@ function HorizontalList({ lang, title, items, onSelect, onRemove, removeLabel })
             key={`${item.mediaType}-${item.id}-${item._key || ''}`}
             role="listitem"
             sx={{ scrollSnapAlign: 'start' }}>
-            <MediaCard item={item} onSelect={onSelect} onRemove={onRemove} removeLabel={removeLabel} />
+            <MediaCard
+              item={item}
+              onSelect={onSelect}
+              onRemove={onRemove}
+              removeLabel={removeLabel}
+              scrollerRef={scrollerRef}
+              onPrefetch={onPrefetch}
+            />
           </Box>
         ))}
       </Box>

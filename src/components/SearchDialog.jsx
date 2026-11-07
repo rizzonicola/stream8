@@ -16,52 +16,62 @@ import {
 } from '@mui/material';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
-import { searchMulti, posterUrl } from '../api/tmdb';
+import { searchMulti } from '../api/tmdb';
+import { posterUrl } from '../utils/images';
 import { tmdbLangCode, t } from '../i18n';
 
-export default function SearchDialog({ open, lang, onClose, onSelect }) {
+export default function SearchDialog({ open, lang, onClose, onSelect, onPrefetch }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const latestRequestId = useRef(0);
+  const abortRef = useRef(null);
 
   useEffect(() => {
+    abortRef.current?.abort();
+    // Invalida subito la richiesta precedente: anche se la risposta era già
+    // in volo, non potrà più sovrascrivere la UI (né al cambio query né
+    // quando il campo viene svuotato o il dialog chiuso).
+    const requestId = ++latestRequestId.current;
+
     if (!open) {
       setQuery('');
       setResults([]);
+      setLoading(false);
+      return undefined;
     }
-  }, [open]);
 
-  useEffect(() => {
-    if (!query.trim()) {
+    const trimmed = query.trim();
+    if (!trimmed) {
       setResults([]);
-      return;
+      setLoading(false);
+      return undefined;
     }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
+
     const handle = setTimeout(() => {
-      const requestId = ++latestRequestId.current;
-      searchMulti(query.trim(), tmdbLangCode(lang))
+      searchMulti(trimmed, tmdbLangCode(lang), { signal: controller.signal })
         .then((data) => {
-          // Se nel frattempo è partita una ricerca più recente (utente ha
-          // continuato a digitare), questa risposta è ormai obsoleta:
-          // applicarla comunque mostrerebbe risultati sbagliati per la
-          // query attuale se arrivasse dopo quella più recente (rete non
-          // garantisce l'ordine di arrivo delle risposte).
           if (latestRequestId.current !== requestId) return;
           setResults(data);
+          setLoading(false);
         })
         .catch(() => {
           if (latestRequestId.current !== requestId) return;
           setResults([]);
-        })
-        .finally(() => {
-          if (latestRequestId.current !== requestId) return;
           setLoading(false);
         });
-    }, 350);
-    return () => clearTimeout(handle);
-  }, [query, lang]);
+    }, 300);
+
+    return () => {
+      clearTimeout(handle);
+      controller.abort();
+    };
+  }, [open, query, lang]);
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
@@ -80,7 +90,7 @@ export default function SearchDialog({ open, lang, onClose, onSelect }) {
             ),
             endAdornment: (
               <InputAdornment position="end">
-                <IconButton size="small" onClick={onClose}>
+                <IconButton size="small" onClick={onClose} aria-label={t(lang, 'close')}>
                   <CloseRoundedIcon fontSize="small" />
                 </IconButton>
               </InputAdornment>
@@ -109,6 +119,8 @@ export default function SearchDialog({ open, lang, onClose, onSelect }) {
                   onSelect(item);
                   onClose();
                 }}
+                onMouseEnter={onPrefetch}
+                onFocus={onPrefetch}
                 sx={{ borderRadius: '8px', mb: 0.5 }}
               >
                 <ListItemAvatar>

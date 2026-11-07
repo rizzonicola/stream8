@@ -118,7 +118,7 @@ const dict = {
       'Come funziona Stream8, cosa salva sul dispositivo e come creare una configurazione personalizzata.',
     info_purpose_title: 'Cosa è Stream8',
     info_purpose_body:
-      'Stream8 è un aggregatore e tracker di streaming personale. Funziona interamente nel tuo browser: nessun dato viene inviato a server esterni, a parte le richieste necessarie a TMDb per recuperare informazioni su film e serie TV. Cronologia, impostazioni e servizi personalizzati restano salvati solo sul tuo dispositivo.',
+      'Stream8 è un aggregatore e tracker di streaming personale. Funziona interamente nel tuo browser: nessun dato viene inviato a server esterni, a parte le richieste necessarie a TMDb per recuperare informazioni su film e serie TV e, solo per gli anime con servizi personalizzati, ad AniList. Se attivi la sincronizzazione, la cronologia viene inviata esclusivamente al server da te configurato. Cronologia, impostazioni e servizi personalizzati restano salvati solo sul tuo dispositivo.',
     info_credits_title: 'Licenze e crediti',
     info_tmdb_credit:
       'Questo prodotto usa l\'API di TMDb ma non è approvato o certificato da TMDb.',
@@ -129,6 +129,8 @@ const dict = {
       "Questo prodotto usa la API pubblica di AniList per risolvere gli ID anime, ma non è approvato o certificato da AniList.",
     year: 'Anno',
     loading: 'Caricamento...',
+    load_error: 'Impossibile caricare i contenuti.',
+    retry: 'Riprova',
     empty_history: 'La cronologia è vuota.',
     empty_history_body:
       'Apri un titolo e scegli un servizio: comparirà qui per riprenderlo rapidamente.',
@@ -347,7 +349,7 @@ const dict = {
       'How Stream8 works, what it stores on your device, and how to create a custom configuration.',
     info_purpose_title: 'What Stream8 is',
     info_purpose_body:
-      'Stream8 is a personal streaming aggregator and tracker. It runs entirely in your browser: no data is sent to external servers, aside from the requests required by TMDb to fetch movie and TV show information. History, settings and custom services stay saved only on your device.',
+      'Stream8 is a personal streaming aggregator and tracker. It runs entirely in your browser: no data is sent to external servers, aside from the requests required by TMDb to fetch movie and TV show information and, only for anime with custom services, by AniList. If you enable sync, your history is sent exclusively to the server you configure. History, settings and custom services stay saved only on your device.',
     info_credits_title: 'Licenses and credits',
     info_tmdb_credit: 'This product uses the TMDb API but is not endorsed or certified by TMDb.',
     info_github_profile: 'rizzonicola on GitHub',
@@ -357,6 +359,8 @@ const dict = {
       'This product uses the public AniList API to resolve anime IDs, but is not endorsed or certified by AniList.',
     year: 'Year',
     loading: 'Loading...',
+    load_error: 'Could not load content.',
+    retry: 'Retry',
     empty_history: 'Your history is empty.',
     empty_history_body:
       'Open a title and choose a service: it will appear here for a quick return.',
@@ -576,7 +580,7 @@ const dict = {
       'Comment fonctionne Stream8, ce qu’il enregistre sur votre appareil et comment créer une configuration personnalisée.',
     info_purpose_title: "Qu'est-ce que Stream8",
     info_purpose_body:
-      "Stream8 est un agrégateur et suivi de streaming personnel. Il fonctionne entièrement dans votre navigateur : aucune donnée n'est envoyée à des serveurs externes, à l'exception des requêtes nécessaires à TMDb pour récupérer les informations sur les films et séries. Historique, paramètres et services personnalisés restent enregistrés uniquement sur votre appareil.",
+      "Stream8 est un agrégateur et suivi de streaming personnel. Il fonctionne entièrement dans votre navigateur : aucune donnée n'est envoyée à des serveurs externes, à l'exception des requêtes nécessaires à TMDb pour récupérer les informations sur les films et séries et, uniquement pour les animes avec des services personnalisés, à AniList. Si vous activez la synchronisation, votre historique est envoyé exclusivement au serveur que vous configurez. Historique, paramètres et services personnalisés restent enregistrés uniquement sur votre appareil.",
     info_credits_title: 'Licences et crédits',
     info_tmdb_credit: "Ce produit utilise l'API TMDb mais n'est ni approuvé ni certifié par TMDb.",
     info_github_profile: 'rizzonicola sur GitHub',
@@ -586,6 +590,8 @@ const dict = {
       "Ce produit utilise l'API publique d'AniList pour résoudre les identifiants d'anime, mais n'est ni approuvé ni certifié par AniList.",
     year: 'Année',
     loading: 'Chargement...',
+    load_error: 'Impossible de charger le contenu.',
+    retry: 'Réessayer',
     empty_history: "Votre historique est vide.",
     empty_history_body:
       'Ouvrez un titre et choisissez un service : il apparaîtra ici pour y revenir rapidement.',

@@ -148,6 +148,12 @@ function WatchOnDialog({
       return;
     }
 
+    // Apre subito la scheda (siamo ancora dentro il click dell'utente):
+    // dopo le attese di rete il browser la bloccherebbe come popup. La
+    // destinazione viene impostata solo quando l'ID AniList è risolto.
+    const pendingTab = window.open('', '_blank');
+    if (pendingTab) pendingTab.opener = null;
+
     setResolvingId(svc.id);
     const year = item.year ? Number(item.year) : undefined;
     const tmdbType = item.mediaType === 'movie' ? 'movie' : 'tv';
@@ -183,15 +189,19 @@ function WatchOnDialog({
     // volo: in tal caso non ha più senso aggiornare la UI del dialog né,
     // soprattutto, procedere ad aprire un link/registrare una voce in
     // cronologia come se fosse stata una scelta ancora valida.
-    if (!openRef.current) return;
+    if (!openRef.current) {
+      pendingTab?.close();
+      return;
+    }
 
     setResolvingId(null);
 
     if (!anilist) {
+      pendingTab?.close();
       setCustomUnavailableIds((prev) => new Set(prev).add(svc.id));
       return;
     }
-    onConfirmWatch({ kind: 'custom', service: svc, item, anilist });
+    onConfirmWatch({ kind: 'custom', service: svc, item, anilist, pendingTab });
   };
 
   return (

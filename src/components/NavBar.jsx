@@ -29,9 +29,8 @@ import MovieRoundedIcon from '@mui/icons-material/MovieRounded';
 import TvRoundedIcon from '@mui/icons-material/TvRounded';
 import AnimationRoundedIcon from '@mui/icons-material/AnimationRounded';
 import { t } from '../i18n';
+import { VIEWS } from '../utils/router';
 import { SURFACE_RADIUS } from '../theme';
-
-export const VIEWS = { HOME: 'home', MOVIES: 'movies', SERIES: 'series', ANIME: 'anime' };
 
 // Sopra questa larghezza usiamo la barra orizzontale completa (desktop/tablet
 // largo); sotto, un pulsante hamburger apre il menu laterale (mobile).
@@ -156,7 +155,7 @@ function NavBar({
       <Box
         sx={{
           borderRadius: `${SURFACE_RADIUS}px`,
-          backdropFilter: 'blur(20px)',
+          backdropFilter: { xs: 'blur(10px)', md: 'blur(16px)' },
           backgroundColor: (theme) =>
             alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.72 : 0.78),
           border: '1px solid',

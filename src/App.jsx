@@ -8,9 +8,17 @@ import { resolveLang, t } from './i18n';
 import OnboardingDialog from './components/OnboardingDialog';
 import ConsentDialog from './components/ConsentDialog';
 import ImportSettingsDialog from './components/ImportSettingsDialog';
-import NavBar, { VIEWS } from './components/NavBar';
+import NavBar from './components/NavBar';
 import SearchDialog from './components/SearchDialog';
-import { useRouter, detailPath, parseDetailPath, ROUTES } from './utils/router';
+import {
+  useRouter,
+  detailPath,
+  parseDetailPath,
+  pathToView,
+  viewToRoute,
+  VIEWS,
+  ROUTES,
+} from './utils/router';
 import { decodeSettingsPayload } from './utils/shareSettings';
 import { useOnlineStatus } from './utils/useOnlineStatus';
 
@@ -30,20 +38,6 @@ function PageLoader() {
     </Box>
   );
 }
-
-function pathToView(pathname) {
-  if (pathname === ROUTES.MOVIES) return VIEWS.MOVIES;
-  if (pathname === ROUTES.SERIES) return VIEWS.SERIES;
-  if (pathname === ROUTES.ANIME) return VIEWS.ANIME;
-  return VIEWS.HOME;
-}
-
-const VIEW_TO_ROUTE = {
-  [VIEWS.HOME]: ROUTES.HOME,
-  [VIEWS.MOVIES]: ROUTES.MOVIES,
-  [VIEWS.SERIES]: ROUTES.SERIES,
-  [VIEWS.ANIME]: ROUTES.ANIME,
-};
 
 function AppShell() {
   const { settings, completeOnboarding, importSettings } = useSettings();
@@ -147,12 +141,15 @@ function AppShell() {
         : undefined;
 
   const openDetail = useCallback((item) => navigate(detailPath(item), item), [navigate]);
-  const changeView = useCallback((v) => navigate(VIEW_TO_ROUTE[v]), [navigate]);
+  const changeView = useCallback((v) => navigate(viewToRoute(v)), [navigate]);
   const openSettings = useCallback(() => navigate(ROUTES.SETTINGS), [navigate]);
   const openInfo = useCallback(() => navigate(ROUTES.INFO), [navigate]);
   const openHistory = useCallback(() => navigate(ROUTES.HISTORY), [navigate]);
   const goHome = useCallback(() => navigate(ROUTES.HOME), [navigate]);
   const openSearch = useCallback(() => setSearchOpen(true), []);
+  const prefetchDetail = useCallback(() => {
+    import('./pages/DetailPage').catch(() => {});
+  }, []);
   const goBack = useCallback(() => window.history.back(), []);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
 
@@ -195,9 +192,17 @@ function AppShell() {
     }
     if (isSettings) return <SettingsPage lang={lang} />;
     if (isInfo) return <InfoPage lang={lang} />;
-    if (isHistory) return <HistoryPage lang={lang} onOpenDetail={openDetail} />;
+    if (isHistory)
+      return <HistoryPage lang={lang} onOpenDetail={openDetail} onPrefetch={prefetchDetail} />;
     if (!isKnownRoute) return <NotFoundPage lang={lang} onGoHome={goHome} />;
-    return <HomePage lang={lang} view={view} onOpenDetail={openDetail} />;
+    return (
+      <HomePage
+        lang={lang}
+        view={view}
+        onOpenDetail={openDetail}
+        onPrefetch={prefetchDetail}
+      />
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, lang]);
 
@@ -258,6 +263,7 @@ function AppShell() {
             lang={lang}
             onClose={closeSearch}
             onSelect={openDetail}
+            onPrefetch={prefetchDetail}
           />
         </>
       )}

@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';import {
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
   Box,
   Container,
   Typography,
@@ -18,7 +19,11 @@ import StarRoundedIcon from '@mui/icons-material/StarRounded';
 import AccessTimeRoundedIcon from '@mui/icons-material/AccessTimeRounded';
 import {
   backdropUrl,
+  backdropSrcSet,
   posterUrl,
+  posterSrcSet,
+} from '../utils/images';
+import {
   fetchDetails,
   fetchCredits,
   fetchSeasonEpisodes,
@@ -26,6 +31,7 @@ import {
 import { tmdbLangCode, t } from '../i18n';
 import { useSettings } from '../context/SettingsContext';
 import { useHistory } from '../context/HistoryContext';
+import { useConnectionHints } from '../hooks/useConnectionHints';
 import WatchOnDialog from '../components/WatchOnDialog';
 import { MAINSTREAM_SEARCH_PATTERN } from '../utils/streamingServices';
 import { buildCustomUrl, pickPatternForItem } from '../utils/customConfigParser';
@@ -47,6 +53,8 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
   const { mediaType, id } = params;
   const { settings } = useSettings();
   const { addEntry } = useHistory();
+  const connection = useConnectionHints();
+  const lowData = connection.saveData || /2g/.test(connection.effectiveType);
 
   const [details, setDetails] = useState(seed || { mediaType, id, title: '', overview: '' });
   const [cast, setCast] = useState([]);
@@ -60,6 +68,8 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
   const [episode, setEpisode] = useState(params.episode || 1);
   const [watchOpen, setWatchOpen] = useState(false);
   const [anilistCacheMsg, setAnilistCacheMsg] = useState('');
+  const [failedBackdropPath, setFailedBackdropPath] = useState(null);
+  const [failedPosterPath, setFailedPosterPath] = useState(null);
   const latestSeasonRequest = useRef(params.season || 1);
 
   const isSeries = mediaType === 'tv' || mediaType === 'anime';
@@ -134,8 +144,15 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
     setEpisode(eps[0]?.episodeNumber || 1);
   };
 
-  const backdrop = backdropUrl(details.backdropPath, 'w1280') || posterUrl(details.posterPath);
-  const poster = posterUrl(details.posterPath, 'w342');
+  const backdrop =
+    backdropUrl(details.backdropPath, lowData ? 'w780' : 'w1280') ||
+    posterUrl(details.posterPath, lowData ? 'w185' : 'w780');
+  const backdropSet =
+    details.backdropPath && !lowData ? backdropSrcSet(details.backdropPath) : undefined;
+  const poster = posterUrl(details.posterPath, lowData ? 'w185' : 'w342');
+  const posterSet = lowData ? undefined : posterSrcSet(details.posterPath, { large: true });
+  const backdropFailed = failedBackdropPath === details.backdropPath;
+  const posterFailed = failedPosterPath === details.posterPath;
 
   // Anno di uscita della stagione TMDb correntemente selezionata (dal primo
   // episodio disponibile): usato solo come "spareggio" quando la catena di
@@ -156,7 +173,7 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
   }, [details.runtimeMinutes, lang]);
 
   const handleConfirmWatch = useCallback(
-    ({ kind, service, item: target, watchLink, anilist }) => {
+    ({ kind, service, item: target, watchLink, anilist, pendingTab }) => {
       let url;
       if (kind === 'mainstream') {
         // Se TMDb fornisce il link "watch" (JustWatch) per la regione, è la
@@ -168,7 +185,12 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
           const query = encodeURIComponent(target.title);
           url = MAINSTREAM_SEARCH_PATTERN[service.id].replace('{query}', query);
         }
-        addEntry({ ...target, viaService: service.name });
+        addEntry({
+          ...target,
+          viaService: service.name,
+          season: isSeries ? season : undefined,
+          episode: isSeries ? episode : undefined,
+        });
       } else {
         const pattern = pickPatternForItem(service.config, target);
         url = buildCustomUrl({
@@ -188,7 +210,11 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
           episode: isSeries ? episode : undefined,
         });
       }
-      window.open(url, '_blank', 'noopener,noreferrer');
+      if (pendingTab && !pendingTab.closed) {
+        pendingTab.location.href = url;
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
       setWatchOpen(false);
     },
     [isSeries, season, episode, addEntry]
@@ -247,12 +273,18 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
   return (
     <Box>
       <Box sx={{ position: 'relative', width: '100%', height: { xs: 320, md: 420 }, overflow: 'hidden' }}>
-        {backdrop && (
+        {backdrop && !backdropFailed && (
           <Box
             component="img"
             src={backdrop}
+            srcSet={backdropSet}
+            sizes="100vw"
             alt=""
             aria-hidden
+            loading="eager"
+            decoding="async"
+            fetchpriority="high"
+            onError={() => setFailedBackdropPath(details.backdropPath)}
             sx={{
               position: 'absolute',
               inset: 0,
@@ -321,12 +353,17 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
 
       <Container maxWidth="md" sx={{ mt: { xs: -4, md: -7 }, position: 'relative', pb: 6 }}>
         <Stack direction="row" spacing={{ sm: 3, md: 4 }} alignItems="flex-start">
-          {poster && (
+          {poster && !posterFailed && (
             <Box
               component="img"
               src={poster}
+              srcSet={posterSet}
+              sizes="(min-width: 900px) 180px, 150px"
               alt=""
               aria-hidden
+              loading="eager"
+              decoding="async"
+              onError={() => setFailedPosterPath(details.posterPath)}
               sx={{
                 display: { xs: 'none', sm: 'block' },
                 width: { sm: 150, md: 180 },
@@ -497,6 +534,7 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
           size="large"
           startIcon={<PlayArrowRoundedIcon />}
           onClick={() => setWatchOpen(true)}
+          disabled={!details.title}
           sx={{ mb: 5 }}
         >
           {t(lang, 'hero_watch_on')}

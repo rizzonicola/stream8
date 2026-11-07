@@ -1,58 +1,34 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { STORAGE_KEYS } from '../utils/storageKeys';
+import { readJson, writeJson, removeKey } from '../utils/storage';
+import {
+  entryKey,
+  groupHistoryByShow,
+  isTombstone,
+  mergeHistories,
+  normalizeHistory,
+  pruneOldTombstones,
+  showKey,
+} from '../utils/historyModel';
 import { useConsent } from './ConsentContext';
 import { useSettings } from './SettingsContext';
-import {
-  fetchRemoteHistory,
-  pushRemoteHistory,
-  mergeHistories,
-  isTombstone,
-  pruneOldTombstones,
-} from '../api/syncClient';
+import { fetchRemoteHistory, pushRemoteHistory } from '../api/syncClient';
 
 function log(...args) {
   console.info('[Stream8 History]', ...args);
 }
 
 function loadHistory() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.HISTORY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    // I tombstone molto vecchi (cancellazioni già propagate ovunque da
-    // tempo) vengono ripuliti anche in locale, per non far crescere la
-    // cronologia salvata all'infinito.
-    return pruneOldTombstones(parsed);
-  } catch {
-    return [];
-  }
+  const parsed = readJson(STORAGE_KEYS.HISTORY, []);
+  if (!Array.isArray(parsed)) return [];
+  return normalizeHistory(pruneOldTombstones(parsed));
 }
 
 function saveHistory(history) {
-  try {
-    localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
-  } catch {
-    // ignora se lo storage non è disponibile
-  }
-}
-
-// Raggruppa la cronologia per titolo (film o serie): per le serie/anime
-// tiene solo l'episodio visto più di recente, così in Home non si accumulano
-// card duplicate per ogni episodio della stessa stagione guardato di seguito.
-// Riceve sempre e solo la cronologia già filtrata dai tombstone (le voci
-// cancellate non devono mai comparire in UI).
-function groupHistoryByShow(history) {
-  const seen = new Map();
-  const ordered = [];
-  for (const entry of history) {
-    const groupKey = `${entry.mediaType}-${entry.id}`;
-    if (!seen.has(groupKey)) {
-      seen.set(groupKey, entry);
-      ordered.push(entry);
-    }
-  }
-  return ordered;
+  return writeJson(STORAGE_KEYS.HISTORY, history, {
+    // Quota esaurita: salva la metà più recente invece di perdere tutto.
+    onQuota: (value) => value.slice(0, Math.max(1, Math.floor(value.length / 2))),
+  });
 }
 
 const HistoryContext = createContext(null);
@@ -60,77 +36,74 @@ const HistoryContext = createContext(null);
 export function HistoryProvider({ children }) {
   const { historyEnabled } = useConsent();
   const { settings, updateSync } = useSettings();
-  // La cronologia funziona sempre normalmente durante la sessione (così
-  // "Continua a guardare" e il flusso "Guarda su..." restano pienamente
-  // funzionanti anche senza consenso); solo la scrittura su disco è
-  // condizionata alla scelta dell'utente.
-  //
-  // `rawHistory` è la VERA fonte di verità: include anche i tombstone
-  // (voci con `deleted: true`) delle cancellazioni, necessari per far
-  // propagare correttamente le rimozioni durante i merge (vedi
-  // syncClient.mergeHistories). Tutto ciò che è rivolto all'utente
-  // (`history`, `groupedHistory`, export) deve invece usare la versione
-  // filtrata, mai `rawHistory` direttamente.
+  // La cronologia funziona sempre durante la sessione; solo la scrittura su
+  // disco è condizionata al consenso. `rawHistory` include i tombstone,
+  // necessari alla propagazione delle cancellazioni; la vista pubblica li filtra.
   const [rawHistory, setRawHistory] = useState(() => (historyEnabled ? loadHistory() : []));
   const [syncing, setSyncing] = useState(false);
 
-  // `rawHistoryRef` rispecchia sempre `rawHistory` in modo SINCRONO. È il
-  // pezzo che risolve il bug principale: prima, `syncNow` leggeva `history`
-  // dalla closure di React (valore "congelato" al render in cui la funzione
-  // è stata creata). Se `addEntry` chiamava `setHistory(next)` e subito dopo
-  // `syncNow()` nello stesso tick, `syncNow` vedeva ancora lo stato PRIMA
-  // dell'aggiunta, faceva il merge con quello stato vecchio, e infine
-  // sovrascriveva lo stato con un risultato che non includeva la voce appena
-  // aggiunta — motivo per cui, con l'auto-sync attivo, guardare un contenuto
-  // a volte non veniva segnato nemmeno in locale. Usando il ref, ogni
-  // funzione legge/scrive sempre il valore più recente, indipendentemente
-  // dal ciclo di render di React.
+  // Ref sincrono: le funzioni sotto devono leggere lo stato più recente anche
+  // quando vengono chiamate nello stesso tick di un setState.
   const rawHistoryRef = useRef(rawHistory);
   const syncInFlightRef = useRef(false);
-  const pendingSyncRef = useRef(null); // null | funzione base da ri-sincronizzare dopo quella in corso
+  const pendingSyncRef = useRef(false);
+  const pushQueueRef = useRef(Promise.resolve());
+  const syncSettingsRef = useRef(settings.sync);
+  syncSettingsRef.current = settings.sync;
+
+  // Le scritture verso il server vengono accodate: un push diretto di
+  // cancellazione e il push finale di una sync non devono sovrascriversi a
+  // vicenda in base all'ordine di arrivo delle risposte HTTP.
+  const enqueuePush = useCallback((task) => {
+    const next = pushQueueRef.current.catch(() => {}).then(task);
+    pushQueueRef.current = next.catch(() => {});
+    return next;
+  }, []);
 
   const setRaw = useCallback((next) => {
     rawHistoryRef.current = next;
     setRawHistory(next);
   }, []);
 
+  // Scrittura debounced: una raffica di aggiunte/rimozioni non deve
+  // serializzare l'intera cronologia sul thread principale ad ogni evento.
   useEffect(() => {
-    if (historyEnabled) saveHistory(rawHistory);
+    if (!historyEnabled) return undefined;
+    const timer = setTimeout(() => saveHistory(rawHistoryRef.current), 200);
+    return () => clearTimeout(timer);
   }, [rawHistory, historyEnabled]);
 
-  // Se l'utente disattiva il salvataggio, rimuoviamo subito quanto già
-  // presente sul dispositivo (diritto alla cancellazione); la sessione
-  // corrente resta visibile in memoria finché non si ricarica la pagina.
+  // Flush quando la pagina sta per essere chiusa o passa in background.
+  useEffect(() => {
+    if (!historyEnabled) return undefined;
+    const flush = () => saveHistory(rawHistoryRef.current);
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [historyEnabled]);
+
+  // Disattivando il salvataggio, rimuoviamo subito quanto già su disco.
   const wasEnabled = useRef(historyEnabled);
   useEffect(() => {
-    if (wasEnabled.current && !historyEnabled) {
-      try {
-        localStorage.removeItem(STORAGE_KEYS.HISTORY);
-      } catch {
-        // ignora
-      }
-    }
+    if (wasEnabled.current && !historyEnabled) removeKey(STORAGE_KEYS.HISTORY);
     wasEnabled.current = historyEnabled;
   }, [historyEnabled]);
 
-  // Vista pubblica: mai tombstone visibili all'utente.
   const history = useMemo(() => rawHistory.filter((e) => !isTombstone(e)), [rawHistory]);
 
   // ---- Sincronizzazione opzionale verso un server auto-ospitato ----
-  // Vedi stream8-sync-server/server.md per il protocollo. Funzione
-  // interamente opzionale: queste funzioni non toccano la rete se
-  // settings.sync.enabled è false, o se url/chiave non sono impostati.
-
-  // Push diretto (sostituisce, non unisce) usato per le rimozioni
-  // esplicite: propaga subito l'intenzione dell'utente invece di rischiare
-  // che un merge la faccia ricomparire da un altro dispositivo. `entries`
-  // deve già includere gli eventuali tombstone appena creati.
   const pushDirect = useCallback(
     async (entries) => {
-      const { sync } = settings;
+      const sync = syncSettingsRef.current;
       if (!historyEnabled || !sync.enabled || !sync.serverUrl || !sync.apiKey) return;
       try {
-        await pushRemoteHistory(sync.serverUrl, sync.apiKey, entries);
+        await enqueuePush(() => pushRemoteHistory(sync.serverUrl, sync.apiKey, entries));
         updateSync({ lastSyncAt: Date.now(), lastError: null });
         log('push diretto completato,', entries.length, 'voci inviate');
       } catch (err) {
@@ -139,38 +112,34 @@ export function HistoryProvider({ children }) {
         updateSync({ lastError: message });
       }
     },
-    [settings, updateSync, historyEnabled]
+    [updateSync, historyEnabled, enqueuePush]
   );
 
-  // Sync completo: legge il remoto, unisce con una base locale (di default
-  // lo stato più aggiornato disponibile, letto dal ref e non dalla
-  // closure), scrive entrambi. Usato dal pulsante "Sincronizza ora" e dalla
-  // sincronizzazione automatica ad ogni nuovo episodio guardato.
-  //
-  // Se viene chiamata mentre una sync è già in corso, invece di abortire
-  // silenziosamente (come accadeva prima — causa primaria dell'"auto sync
-  // instabile", perché una sync scattata da un episodio poteva sparire nel
-  // nulla senza traccia), la richiesta viene accodata e rieseguita
-  // automaticamente subito dopo, sulla base più recente disponibile.
+  // Sync completo: legge il remoto, unisce con la cronologia locale PIÙ
+  // RECENTE (riletta dal ref dopo l'attesa di rete) e riscrive entrambi.
+  // Rileggere il ref a merge avvenuto è essenziale: una rimozione o
+  // un'importazione fatta mentre la richiesta era in volo non deve essere
+  // sovrascritta da uno snapshot precedente.
   const runSync = useCallback(
-    async (baseList) => {
-      const { sync } = settings;
+    async () => {
+      const sync = syncSettingsRef.current;
       if (!historyEnabled || !sync.enabled || !sync.serverUrl || !sync.apiKey) return;
 
       if (syncInFlightRef.current) {
         log('sync già in corso: la richiesta verrà rieseguita al termine');
-        pendingSyncRef.current = () => rawHistoryRef.current;
+        pendingSyncRef.current = true;
         return;
       }
 
       syncInFlightRef.current = true;
       setSyncing(true);
       try {
-        const base = baseList ?? rawHistoryRef.current;
         const remote = await fetchRemoteHistory(sync.serverUrl, sync.apiKey);
-        const merged = pruneOldTombstones(mergeHistories(base, remote)).slice(0, 100);
+        const merged = normalizeHistory(
+          pruneOldTombstones(mergeHistories(rawHistoryRef.current, remote))
+        );
         setRaw(merged);
-        await pushRemoteHistory(sync.serverUrl, sync.apiKey, merged);
+        await enqueuePush(() => pushRemoteHistory(sync.serverUrl, sync.apiKey, merged));
         updateSync({ lastSyncAt: Date.now(), lastError: null });
         log('sync completata,', merged.length, 'voci (di cui tombstone:', merged.filter(isTombstone).length, ')');
       } catch (err) {
@@ -181,86 +150,87 @@ export function HistoryProvider({ children }) {
         syncInFlightRef.current = false;
         setSyncing(false);
         if (pendingSyncRef.current) {
-          const getBase = pendingSyncRef.current;
-          pendingSyncRef.current = null;
-          runSync(getBase());
+          pendingSyncRef.current = false;
+          runSync();
         }
       }
     },
-    [settings, updateSync, historyEnabled, setRaw]
+    [updateSync, historyEnabled, setRaw, enqueuePush]
   );
 
-  const syncNow = useCallback(() => runSync(undefined), [runSync]);
+  const syncNow = useCallback(() => runSync(), [runSync]);
 
-  // Ognuna di queste funzioni è avvolta in useCallback: senza, veniva
-  // ricreata ad ogni cambio di `history` (cioè quasi ad ogni azione
-  // dell'utente), e la nuova identità si propagava come nuova prop
-  // `onRemove`/`onSelect` fino a HistorySection -> HorizontalList ->
-  // MediaCard, vanificando i loro memo() e causando un re-render dell'intera
-  // lista ad ogni singola aggiunta/rimozione, invece che delle sole card
-  // effettivamente cambiate.
   const addEntry = useCallback(
     (entry) => {
-      const key = `${entry.mediaType}-${entry.id}-${entry.season ?? ''}-${entry.episode ?? ''}`;
-      const next = [
-        { ...entry, _key: key, watchedAt: Date.now(), deleted: false },
-        ...rawHistoryRef.current.filter((e) => e._key !== key),
-      ].slice(0, 100);
+      const candidate = { ...entry, watchedAt: Date.now(), deleted: false };
+      const key = entryKey(candidate);
+      if (!key) return;
+      const next = normalizeHistory([{ ...candidate, _key: key }, ...rawHistoryRef.current]);
       setRaw(next);
       log('voce aggiunta:', key);
-      if (settings.sync.enabled && settings.sync.autoSync) {
-        // Fire-and-forget: non blocca l'azione dell'utente. Passiamo
-        // esplicitamente `next` come base del merge, invece di lasciare
-        // che runSync rilegga lo stato da solo in un momento successivo:
-        // questo è ciò che garantisce che la voce appena aggiunta sia
-        // sempre presente nel merge, eliminando la race condition.
-        runSync(next);
+      const sync = syncSettingsRef.current;
+      if (sync.enabled && sync.autoSync) {
+        runSync();
       }
     },
-    [setRaw, settings.sync.enabled, settings.sync.autoSync, runSync]
+    [setRaw, runSync]
   );
 
   const removeEntry = useCallback(
     (key) => {
-      // Cancellazione = tombstone, non rimozione secca dell'elemento.
-      // Un tombstone è una normale voce con `deleted: true` e un
-      // `watchedAt` aggiornato ad "adesso": è quello che permette al
-      // last-write-wins di mergeHistories di far vincere la
-      // cancellazione su qualunque copia più vecchia della stessa voce
-      // presente su altri dispositivi, invece di lasciare che "riappaia"
-      // al sync successivo.
-      const next = [
-        { _key: key, watchedAt: Date.now(), deleted: true },
+      if (!key) return;
+      const tombstone = { _key: key, watchedAt: Date.now(), deleted: true };
+      const next = normalizeHistory([
+        tombstone,
         ...rawHistoryRef.current.filter((e) => e._key !== key),
-      ];
+      ]);
       setRaw(next);
       log('voce cancellata (tombstone creato):', key);
-      if (settings.sync.enabled) {
-        pushDirect(next);
-      }
+      if (syncSettingsRef.current.enabled) pushDirect(next);
     },
-    [setRaw, settings.sync.enabled, pushDirect]
+    [setRaw, pushDirect]
+  );
+
+  // La card raggruppata in Home rappresenta l'intera serie: rimuoverla deve
+  // creare un tombstone per ogni episodio visibile, non solo per l'ultimo.
+  const removeShow = useCallback(
+    (item) => {
+      const key = showKey(item);
+      if (!key) return;
+      const keys = new Set(
+        rawHistoryRef.current
+          .filter((e) => !isTombstone(e) && showKey(e) === key)
+          .map((e) => e._key)
+      );
+      if (keys.size === 0) return;
+      const now = Date.now();
+      const tombstones = [...keys].map((_key) => ({ _key, watchedAt: now, deleted: true }));
+      const next = normalizeHistory([
+        ...tombstones,
+        ...rawHistoryRef.current.filter((e) => !keys.has(e._key)),
+      ]);
+      setRaw(next);
+      log('serie cancellata (tombstone creati):', keys.size);
+      if (syncSettingsRef.current.enabled) pushDirect(next);
+    },
+    [setRaw, pushDirect]
   );
 
   const clearHistory = useCallback(() => {
     const now = Date.now();
-    // Un tombstone per ogni voce attualmente visibile, così la
-    // cancellazione di massa si propaga voce per voce come una
-    // cancellazione singola; i tombstone già esistenti restano intatti.
     const tombstones = rawHistoryRef.current
       .filter((e) => !isTombstone(e))
       .map((e) => ({ _key: e._key, watchedAt: now, deleted: true }));
-    const next = [...tombstones, ...rawHistoryRef.current.filter((e) => isTombstone(e))];
+    const next = normalizeHistory([
+      ...tombstones,
+      ...rawHistoryRef.current.filter((e) => isTombstone(e)),
+    ]);
     setRaw(next);
     log('cronologia svuotata,', tombstones.length, 'tombstone creati');
-    if (settings.sync.enabled) {
-      pushDirect(next);
-    }
-  }, [setRaw, settings.sync.enabled, pushDirect]);
+    if (syncSettingsRef.current.enabled) pushDirect(next);
+  }, [setRaw, pushDirect]);
 
   const exportHistory = useCallback(() => {
-    // Solo le voci visibili: i tombstone sono un dettaglio interno di
-    // sincronizzazione e non hanno senso in un export per l'utente.
     const blob = new Blob([JSON.stringify(history, null, 2)], {
       type: 'application/json',
     });
@@ -278,40 +248,47 @@ export function HistoryProvider({ children }) {
     (jsonText) => {
       const parsed = JSON.parse(jsonText);
       if (!Array.isArray(parsed)) throw new Error('Il file di cronologia non è valido.');
-      // Il file importato non conosce i tombstone locali: li uniamo con
-      // mergeHistories (stesso last-write-wins usato per la rete) invece
-      // di sovrascrivere `rawHistory` di netto, così un'importazione non
-      // fa "risorgere" per sbaglio voci che erano state cancellate di
-      // proposito e non erano presenti nel file esportato in precedenza.
-      const merged = mergeHistories(
+      // Importa solo voci valide, poi unisce con i tombstone locali: una
+      // cancellazione esplicita non deve "risorgere" da un file vecchio.
+      const imported = normalizeHistory(
         parsed.map((e) => ({ ...e, deleted: false })),
-        rawHistoryRef.current
+        { limit: Number.POSITIVE_INFINITY }
+      );
+      const merged = normalizeHistory(
+        pruneOldTombstones(mergeHistories(imported, rawHistoryRef.current))
       );
       setRaw(merged);
-      log('cronologia importata,', parsed.length, 'voci nel file');
-      if (settings.sync.enabled) {
-        pushDirect(merged);
-      }
+      log('cronologia importata,', imported.length, 'voci valide nel file');
+      if (syncSettingsRef.current.enabled) pushDirect(merged);
     },
-    [setRaw, settings.sync.enabled, pushDirect]
+    [setRaw, pushDirect]
   );
 
   const api = useMemo(
     () => ({
       history,
-      // Vista compatta: un'unica card per show (l'ultimo episodio visto),
-      // usata in Home e nelle altre sezioni. La cronologia completa con
-      // ogni episodio separato resta disponibile in `history`.
+      // Vista compatta: una card per show (l'ultimo episodio visto).
       groupedHistory: groupHistoryByShow(history),
       syncing,
       syncNow,
       addEntry,
       removeEntry,
+      removeShow,
       clearHistory,
       exportHistory,
       importHistory,
     }),
-    [history, syncing, syncNow, addEntry, removeEntry, clearHistory, exportHistory, importHistory]
+    [
+      history,
+      syncing,
+      syncNow,
+      addEntry,
+      removeEntry,
+      removeShow,
+      clearHistory,
+      exportHistory,
+      importHistory,
+    ]
   );
 
   return <HistoryContext.Provider value={api}>{children}</HistoryContext.Provider>;

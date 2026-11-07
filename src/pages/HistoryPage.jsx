@@ -11,7 +11,7 @@ import { useHistory } from '../context/HistoryContext';
 import { readJsonFile } from '../utils/customConfigParser';
 import { t } from '../i18n';
 
-export default function HistoryPage({ lang, onOpenDetail }) {
+export default function HistoryPage({ lang, onOpenDetail, onPrefetch }) {
   const { history, removeEntry, clearHistory, exportHistory, importHistory } = useHistory();
   const [confirmClear, setConfirmClear] = useState(false);
   const [message, setMessage] = useState(null);
@@ -89,14 +89,18 @@ export default function HistoryPage({ lang, onOpenDetail }) {
             gap: { xs: 2, sm: 2.5 },
           }}>
           {history.map((entry) => (
-            <MediaCard
+            <Box
               key={entry._key}
-              item={entry}
-              fullWidth
-              onSelect={onOpenDetail}
-              onRemove={handleRemove}
-              removeLabel={t(lang, 'history_remove')}
-            />
+              sx={{ contentVisibility: 'auto', containIntrinsicSize: '0 300px' }}>
+              <MediaCard
+                item={entry}
+                fullWidth
+                onSelect={onOpenDetail}
+                onRemove={handleRemove}
+                removeLabel={t(lang, 'history_remove')}
+                onPrefetch={onPrefetch}
+              />
+            </Box>
           ))}
         </Box>
       )}

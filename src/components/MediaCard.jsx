@@ -1,8 +1,9 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { Box, Typography, IconButton, alpha } from '@mui/material';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import StarRoundedIcon from '@mui/icons-material/StarRounded';
-import { posterUrl, posterSrcSet } from '../api/tmdb';
+import { posterUrl, posterSrcSet } from '../utils/images';
+import { useNearViewport } from '../hooks/useNearViewport';
 import { CARD_RADIUS } from '../theme';
 
 /**
@@ -10,8 +11,23 @@ import { CARD_RADIUS } from '../theme';
  * L'intera card è un unico bersaglio cliccabile e raggiungibile da tastiera;
  * il pulsante di rimozione resta un controllo separato, non annidato.
  */
-function MediaCard({ item, onSelect, onRemove, removeLabel, fullWidth = false }) {
+function MediaCard({
+  item,
+  onSelect,
+  onRemove,
+  removeLabel,
+  fullWidth = false,
+  scrollerRef,
+  onPrefetch,
+}) {
+  const [failedPath, setFailedPath] = useState(null);
+  const [cardRef, near] = useNearViewport({
+    rootRef: scrollerRef,
+    enabled: !fullWidth,
+  });
   const poster = posterUrl(item.posterPath, 'w342');
+  const imageFailed = failedPath === item.posterPath;
+  const showImage = Boolean(poster) && !imageFailed && near;
   const episodeBadge =
     item.mediaType !== 'movie' && item.season != null && item.episode != null
       ? `S${item.season} · E${item.episode}`
@@ -26,6 +42,7 @@ function MediaCard({ item, onSelect, onRemove, removeLabel, fullWidth = false })
 
   return (
     <Box
+      ref={cardRef}
       sx={{
         position: 'relative',
         width: fullWidth ? '100%' : { xs: 132, sm: 156 },
@@ -43,6 +60,8 @@ function MediaCard({ item, onSelect, onRemove, removeLabel, fullWidth = false })
         tabIndex={0}
         onClick={() => onSelect(item)}
         onKeyDown={handleKeyDown}
+        onMouseEnter={onPrefetch}
+        onFocus={onPrefetch}
         aria-label={[item.title, item.year].filter(Boolean).join(', ')}
         sx={{
           cursor: 'pointer',
@@ -72,18 +91,23 @@ function MediaCard({ item, onSelect, onRemove, removeLabel, fullWidth = false })
               },
             },
           }}>
-          {poster ? (
+          {showImage ? (
             <Box
               component="img"
               src={poster}
               srcSet={posterSrcSet(item.posterPath)}
-              sizes={fullWidth ? '(min-width: 600px) 33vw, 50vw' : '(min-width: 600px) 156px, 132px'}
+              sizes={
+                fullWidth
+                  ? '(min-width: 1200px) 200px, (min-width: 600px) 25vw, 45vw'
+                  : '(min-width: 600px) 156px, 132px'
+              }
               alt=""
               loading="lazy"
               decoding="async"
+              onError={() => setFailedPath(item.posterPath)}
               sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             />
-          ) : (
+          ) : !poster || imageFailed ? (
             <Box
               sx={{
                 width: '100%',
@@ -95,7 +119,7 @@ function MediaCard({ item, onSelect, onRemove, removeLabel, fullWidth = false })
               }}>
               <Typography variant="caption">{item.title?.[0]}</Typography>
             </Box>
-          )}
+          ) : null}
 
           {item.voteAverage > 0 && (
             <Box
@@ -177,9 +201,8 @@ function MediaCard({ item, onSelect, onRemove, removeLabel, fullWidth = false })
             right: 7,
             width: 30,
             height: 30,
-            bgcolor: 'rgba(10, 14, 13, 0.55)',
+            bgcolor: 'rgba(10, 14, 13, 0.78)',
             color: '#fff',
-            backdropFilter: 'blur(8px)',
             border: '1px solid rgba(255, 255, 255, 0.18)',
             transition: 'opacity 150ms ease, transform 150ms ease, background-color 150ms ease',
             '&:hover': { bgcolor: (theme) => alpha(theme.palette.error.main, 0.9) },

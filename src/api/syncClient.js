@@ -106,58 +106,6 @@ export async function pushRemoteHistory(serverUrl, apiKey, entries) {
   return Array.isArray(data?.entries) ? data.entries : [];
 }
 
-// Una voce è un "tombstone": non rappresenta più un titolo visto, ma il
-// ricordo esplicito di un'eliminazione. Deve continuare a viaggiare nei
-// merge/push (altrimenti la cancellazione non si propaga mai agli altri
-// dispositivi), ma va nascosta da qualunque elenco mostrato all'utente.
-export function isTombstone(entry) {
-  return !!entry?.deleted;
-}
-
-// Rimuove i tombstone più vecchi di `maxAgeMs` (default 90 giorni): una volta
-// trascorso un tempo ragionevole tutti i dispositivi attivi avranno già
-// visto la cancellazione, quindi il tombstone può essere fatto sparire
-// anche localmente senza rischiare che l'elemento "risorga".
-export function pruneOldTombstones(entries, maxAgeMs = 90 * 24 * 60 * 60 * 1000) {
-  const cutoff = Date.now() - maxAgeMs;
-  return entries.filter((e) => !isTombstone(e) || (e.watchedAt ?? 0) >= cutoff);
-}
-
-// Unisce cronologia locale e remota per "_key", tenendo per ciascuna la
-// voce con "watchedAt" più recente. Usato prima di ogni sync automatico o
-// manuale (non per le rimozioni esplicite, che vanno propagate dirette:
-// vedi server.md sezione 6).
-//
-// IMPORTANTE — cancellazioni: una cancellazione è rappresentata come una
-// normale voce con `deleted: true` e `watchedAt` aggiornato al momento
-// della cancellazione (un "tombstone"), non come l'assenza della voce.
-// Questo è ciò che permette a questa stessa funzione last-write-wins di
-// gestire correttamente sia le aggiunte sia le rimozioni con un unico
-// confronto per timestamp: un tombstone più recente batte una visione
-// vecchia (la cancellazione vince, come atteso), mentre una nuova visione
-// successiva alla cancellazione batte il tombstone (ri-guardare un titolo
-// dopo averlo rimosso lo fa correttamente ricomparire). Se una cancellazione
-// venisse invece rappresentata come semplice "assenza della voce" (come
-// accadeva nella versione precedente), un merge con qualunque replica che
-// non ha ancora ricevuto la cancellazione la farebbe risorgere per sempre:
-// è la causa principale del bug "gli elementi cancellati riappaiono".
-export function mergeHistories(local, remote) {
-  const byKey = new Map();
-  const noKeyOrder = [];
-
-  for (const entry of [...remote, ...local]) {
-    const key = entry?._key;
-    if (!key) {
-      noKeyOrder.push(entry);
-      continue;
-    }
-    const existing = byKey.get(key);
-    if (!existing || (entry.watchedAt ?? 0) >= (existing.watchedAt ?? 0)) {
-      byKey.set(key, entry);
-    }
-  }
-
-  const merged = [...byKey.values(), ...noKeyOrder];
-  merged.sort((a, b) => (b.watchedAt ?? 0) - (a.watchedAt ?? 0));
-  return merged;
-}
+// Le regole di dominio della cronologia (tombstone, merge, ordinamento e
+// compattazione) vivono in utils/historyModel.js: questo modulo resta il
+// solo trasporto HTTP verso il server di sync.

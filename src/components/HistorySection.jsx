@@ -1,10 +1,8 @@
-import { memo, useCallback } from 'react';
+import { memo } from 'react';
 import HorizontalList from './HorizontalList';
 import { t } from '../i18n';
 
-function HistorySection({ lang, history, onSelect, onRemove }) {
-  const handleRemove = useCallback((item) => onRemove(item._key), [onRemove]);
-
+function HistorySection({ lang, history, onSelect, onRemove, onPrefetch }) {
   if (!history || history.length === 0) return null;
 
   return (
@@ -13,8 +11,9 @@ function HistorySection({ lang, history, onSelect, onRemove }) {
       title={t(lang, 'section_history')}
       items={history}
       onSelect={onSelect}
-      onRemove={handleRemove}
+      onRemove={onRemove}
       removeLabel={t(lang, 'history_remove')}
+      onPrefetch={onPrefetch}
     />
   );
 }

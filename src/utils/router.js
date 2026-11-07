@@ -1,27 +1,75 @@
 import { useCallback, useEffect, useState } from 'react';
 
-/**
- * Router minimale basato sulla History API nativa del browser.
- * -------------------------------------------------------------
- * Non usa nessuna libreria esterna: aggiorna `window.history` con
- * pushState/replaceState e ascolta l'evento `popstate`, così il tasto
- * "indietro" del sistema (o del browser) riporta correttamente alla
- * schermata precedente dell'app, invece di uscire dal sito.
- */
+// Mappa unica tra viste della Home e percorsi: evita che App, NavBar e
+// HomePage tengano ciascuno la propria copia della stessa tabella.
+export const VIEWS = { HOME: 'home', MOVIES: 'movies', SERIES: 'series', ANIME: 'anime' };
 
+export const ROUTES = {
+  HOME: '/',
+  MOVIES: '/movies',
+  SERIES: '/series',
+  ANIME: '/anime',
+  HISTORY: '/history',
+  SETTINGS: '/settings',
+  INFO: '/info',
+  IMPORT_SETTINGS: '/import-settings',
+};
+
+const VIEW_ROUTES = {
+  [VIEWS.HOME]: ROUTES.HOME,
+  [VIEWS.MOVIES]: ROUTES.MOVIES,
+  [VIEWS.SERIES]: ROUTES.SERIES,
+  [VIEWS.ANIME]: ROUTES.ANIME,
+};
+
+export function pathToView(pathname) {
+  if (pathname === ROUTES.MOVIES) return VIEWS.MOVIES;
+  if (pathname === ROUTES.SERIES) return VIEWS.SERIES;
+  if (pathname === ROUTES.ANIME) return VIEWS.ANIME;
+  return VIEWS.HOME;
+}
+
+export function viewToRoute(view) {
+  return VIEW_ROUTES[view] ?? ROUTES.HOME;
+}
+
+function currentPath() {
+  return window.location.pathname + window.location.search;
+}
+
+function scrollToTop() {
+  window.scrollTo(0, 0);
+}
+
+// Router minimale basato sulla History API nativa del browser.
+// La posizione di scorrimento viene salvata nella voce di cronologia prima
+// di ogni push e ripristinata su back/forward: senza questo, tornando
+// indietro da un dettaglio si finirebbe sempre in cima alla Home.
 export function useRouter() {
-  const [path, setPath] = useState(() => window.location.pathname + window.location.search);
+  const [path, setPath] = useState(currentPath);
 
   useEffect(() => {
-    const handlePop = () => setPath(window.location.pathname + window.location.search);
+    if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual';
+
+    const handlePop = (event) => {
+      setPath(currentPath());
+      const target = Number(event.state?.scrollY) || 0;
+      requestAnimationFrame(() => window.scrollTo(0, target));
+    };
     window.addEventListener('popstate', handlePop);
     return () => window.removeEventListener('popstate', handlePop);
   }, []);
 
   const navigate = useCallback((to, state) => {
-    if (to === window.location.pathname + window.location.search) return;
-    window.history.pushState(state ?? null, '', to);
+    if (to === currentPath()) return;
+    // Conserva la posizione attuale nella voce che stiamo lasciando.
+    window.history.replaceState(
+      { ...(window.history.state || {}), scrollY: window.scrollY },
+      ''
+    );
+    window.history.pushState({ ...(state || {}), scrollY: 0 }, '', to);
     setPath(to);
+    requestAnimationFrame(scrollToTop);
   }, []);
 
   const replace = useCallback((to, state) => {
@@ -35,14 +83,8 @@ export function useRouter() {
 // --- Helper per costruire/leggere i percorsi usati dall'app ---
 
 // Se l'item ha stagione/episodio (es. proviene dalla cronologia, o l'utente
-// li ha già selezionati in pagina), li porta nell'URL come query string.
-// Questo permette a due cose di funzionare correttamente:
-//  1. Cliccando un episodio dalla cronologia si apre già su quell'episodio,
-//     non sempre sul primo della prima stagione.
-//  2. Se il browser sospende/ricarica la scheda mentre si è su un servizio
-//     esterno (es. su mobile, per risparmio memoria) e si torna indietro,
-//     la stagione/episodio selezionati si ripristinano dall'URL stesso,
-//     non solo dallo stato in memoria (che a quel punto sarebbe perso).
+// li ha già selezionati in pagina), li porta nell'URL come query string:
+// così il dettaglio si riapre sull'episodio giusto anche dopo un reload.
 export function detailPath(item) {
   const base = `/title/${item.mediaType}/${item.id}`;
   const params = new URLSearchParams();
@@ -54,7 +96,7 @@ export function detailPath(item) {
 
 export function parseDetailPath(path) {
   const [pathname, search] = path.split('?');
-  const match = pathname.match(/^\/title\/(movie|tv|anime)\/(\d+)/);
+  const match = pathname.match(/^\/title\/(movie|tv|anime)\/(\d+)\/?$/);
   if (!match) return null;
   const result = { mediaType: match[1], id: Number(match[2]) };
   if (search) {
@@ -64,14 +106,3 @@ export function parseDetailPath(path) {
   }
   return result;
 }
-
-export const ROUTES = {
-  HOME: '/',
-  MOVIES: '/movies',
-  SERIES: '/series',
-  ANIME: '/anime',
-  HISTORY: '/history',
-  SETTINGS: '/settings',
-  INFO: '/info',
-  IMPORT_SETTINGS: '/import-settings',
-};

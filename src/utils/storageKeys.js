@@ -7,4 +7,5 @@ export const STORAGE_KEYS = {
   CONSENT: 'stream8_consent_v1',
   SETTINGS: 'stream8_settings_v1',
   HISTORY: 'stream8_history_v1',
+  ANILIST_CHAIN_PREFIX: 'stream8:anilistChain:v1:',
 };

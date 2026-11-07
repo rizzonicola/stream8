@@ -12,7 +12,13 @@ import ArrowBackIosNewRoundedIcon from '@mui/icons-material/ArrowBackIosNewRound
 import ArrowForwardIosRoundedIcon from '@mui/icons-material/ArrowForwardIosRounded';
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded';
 import StarRoundedIcon from '@mui/icons-material/StarRounded';
-import { backdropUrl } from '../api/tmdb';
+import {
+  backdropUrl,
+  backdropSrcSet,
+  decodeImage,
+  preloadImage,
+} from '../utils/images';
+import { useConnectionHints } from '../hooks/useConnectionHints';
 import { t } from '../i18n';
 
 const AUTOPLAY_MS = 5500;
@@ -43,12 +49,15 @@ function MetaDot() {
   );
 }
 
-export default function HeroSlider({ lang, items, onSelect }) {
+export default function HeroSlider({ lang, items, onSelect, onPrefetch }) {
   const [index, setIndex] = useState(0);
+  const [loadedKey, setLoadedKey] = useState(null);
   const timerRef = useRef(null);
   const pausedRef = useRef(false);
   const touchStartX = useRef(null);
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const connection = useConnectionHints();
+  const lowData = connection.saveData || /2g/.test(connection.effectiveType);
 
   // Se si cambia categoria, l'indice corrente potrebbe puntare oltre la
   // fine del nuovo elenco: si riparte da una posizione sempre valida.
@@ -71,9 +80,10 @@ export default function HeroSlider({ lang, items, onSelect }) {
     clearInterval(timerRef.current);
     if (reduceMotion) return;
     timerRef.current = setInterval(() => {
-      // In pausa su hover/focus: il carosello non deve cambiare sotto il
-      // puntatore o mentre l'utente legge con la tastiera.
-      if (!pausedRef.current) {
+      // In pausa su hover/focus e a scheda in background: il carosello non
+      // deve cambiare sotto il puntatore né consumare risorse quando l'utente
+      // non sta guardando la pagina.
+      if (!pausedRef.current && document.visibilityState !== 'hidden') {
         setIndex((i) => (items.length ? (i + 1) % items.length : 0));
       }
     }, AUTOPLAY_MS);
@@ -84,9 +94,34 @@ export default function HeroSlider({ lang, items, onSelect }) {
     return () => clearInterval(timerRef.current);
   }, [startTimer]);
 
+  // Precarica in sottofondo le slide adiacenti: quando arriva il turno,
+  // l'immagine è già nella cache HTTP e la decodifica parte subito.
+  useEffect(() => {
+    if (!items?.length || lowData) return;
+    const neighbours = [
+      items[(index + 1) % items.length],
+      items[(index - 1 + items.length) % items.length],
+    ];
+    const seen = new Set();
+    for (const item of neighbours) {
+      const path = item?.backdropPath;
+      if (!path || seen.has(path)) continue;
+      seen.add(path);
+      preloadImage(backdropUrl(path, 'w1280'), {
+        srcSet: backdropSrcSet(path),
+        sizes: '100vw',
+        fetchPriority: 'low',
+      });
+    }
+  }, [items, index, lowData]);
+
   if (!items || items.length === 0) return null;
   const current = items[index] || items[0];
-  const bg = backdropUrl(current.backdropPath, 'w1280');
+  const imageKey = `${current.mediaType}-${current.id}`;
+  const imageLoaded = loadedKey === imageKey;
+  // Con risparmio dati o rete molto lenta si evita la variante più pesante
+  // e il browser non può sceglierla tramite srcset.
+  const backdrop = backdropUrl(current.backdropPath, lowData ? 'w780' : 'w1280');
 
   const handleManual = (fn) => {
     fn();
@@ -133,19 +168,37 @@ export default function HeroSlider({ lang, items, onSelect }) {
         else if (delta < -50) handleManual(next);
         touchStartX.current = null;
       }}>
-      <Box
-        key={`${current.mediaType}-${current.id}-${index}`}
-        sx={{
-          position: 'absolute',
-          inset: 0,
-          backgroundImage: bg ? `url(${bg})` : 'none',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          animation: reduceMotion
-            ? 'none'
-            : 'stream8HeroFade 700ms cubic-bezier(0.22, 1, 0.36, 1) both',
-        }}
-      />
+      <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'background.default' }} />
+      {backdrop && (
+        <Box
+          key={imageKey}
+          component="img"
+          src={backdrop}
+          srcSet={lowData ? undefined : backdropSrcSet(current.backdropPath)}
+          sizes="100vw"
+          alt=""
+          aria-hidden
+          loading="eager"
+          decoding="async"
+          fetchpriority={index === 0 ? 'high' : 'auto'}
+          onLoad={(event) => {
+            const img = event.currentTarget;
+            decodeImage(img).then(() => {
+              if (img.isConnected) setLoadedKey(imageKey);
+            });
+          }}
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            opacity: imageLoaded ? 1 : 0,
+            transition: reduceMotion ? 'none' : 'opacity 600ms cubic-bezier(0.22, 1, 0.36, 1)',
+            willChange: imageLoaded ? 'auto' : 'opacity',
+          }}
+        />
+      )}
 
       <Box
         aria-hidden
@@ -164,6 +217,8 @@ export default function HeroSlider({ lang, items, onSelect }) {
 
       <Box
         onClick={() => onSelect(current)}
+        onMouseEnter={onPrefetch}
+        onFocusCapture={onPrefetch}
         sx={{
           position: 'absolute',
           left: { xs: 20, md: 48 },

@@ -28,6 +28,10 @@
 // quale stagione TV della catena ricade l'episodio TMDb selezionato,
 // sommando progressivamente gli episodi delle sole stagioni TV precedenti.
 
+import { LruCache } from '../utils/lruCache';
+import { readJson, writeJson, removeKey, keysWithPrefix } from '../utils/storage';
+import { STORAGE_KEYS } from '../utils/storageKeys';
+
 const ANILIST_ENDPOINT = 'https://graphql.anilist.co';
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -86,20 +90,7 @@ const INTER_HOP_DELAY_MS = 350;
 // Stessa strategia di cache/deduplica usata in api/tmdb.js: evita di
 // interrogare due volte AniList per lo stesso titolo nella stessa sessione.
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minuti: questi ID non cambiano mai
-// Limite morbido, come in api/tmdb.js: una scheda tenuta aperta per ore
-// (o una sessione in cui si esplorano centinaia di anime diversi) non deve
-// far crescere le cache all'infinito. Vengono ripulite le sole voci scadute
-// quando si supera la soglia, senza timer separati che girerebbero anche in
-// background.
 const MAX_CACHE_ENTRIES = 200;
-
-function pruneExpiredEntries(cache) {
-  if (cache.size <= MAX_CACHE_ENTRIES) return;
-  const now = Date.now();
-  for (const [key, entry] of cache) {
-    if (entry.expiry <= now) cache.delete(key);
-  }
-}
 
 function cacheKey(title, year) {
   return `${title.toLowerCase().trim()}::${year || ''}`;
@@ -182,7 +173,7 @@ const SEARCH_QUERY = `
   }
 `;
 
-const searchCache = new Map(); // key -> { data, expiry }
+const searchCache = new LruCache(MAX_CACHE_ENTRIES);
 const searchInFlight = new Map(); // key -> Promise
 
 async function queryAnilistSearch(title, year) {
@@ -218,15 +209,14 @@ export async function searchAnilistMedia(title, year) {
   const key = cacheKey(title, year);
 
   const cached = searchCache.get(key);
-  if (cached && cached.expiry > Date.now()) return cached.data;
+  if (cached !== undefined) return cached;
 
   const pending = searchInFlight.get(key);
   if (pending) return pending;
 
   const request = queryAnilistSearch(title, year)
     .then((data) => {
-      searchCache.set(key, { data, expiry: Date.now() + CACHE_TTL_MS });
-      pruneExpiredEntries(searchCache);
+      searchCache.set(key, data, CACHE_TTL_MS);
       return data;
     })
     .catch((err) => {
@@ -286,32 +276,63 @@ export async function searchAnilistMedia(title, year) {
 // seleziona la Stagione 5 → si riparte dal nodo della Stagione 4 già in
 // cache e si fa UNA sola richiesta aggiuntiva per raggiungere la 5, non da
 // capo dalla Stagione 1).
-const CHAIN_STORAGE_PREFIX = 'stream8:anilistChain:v1:';
+const CHAIN_STORAGE_PREFIX = STORAGE_KEYS.ANILIST_CHAIN_PREFIX;
+const CHAIN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const CHAIN_MAX_ENTRIES = 50;
+let chainsPruned = false;
 
 function chainStorageKey(title, year) {
   return CHAIN_STORAGE_PREFIX + cacheKey(title, year);
 }
 
+// Le chiavi sono dinamiche (una per titolo): senza un registro, localStorage
+// crescerebbe per sempre. Scansione unica per sessione; il ripiego sulla
+// quota e la scadenza TTL evitano comunque una crescita illimitata.
+function prunePersistedChains(maxEntries = CHAIN_MAX_ENTRIES) {
+  const now = Date.now();
+  const kept = [];
+  for (const key of keysWithPrefix(CHAIN_STORAGE_PREFIX)) {
+    const parsed = readJson(key, null);
+    const updatedAt = Number(parsed?.updatedAt) || 0;
+    if (!parsed || now - updatedAt > CHAIN_TTL_MS) {
+      removeKey(key);
+      continue;
+    }
+    kept.push({ key, updatedAt });
+  }
+  kept.sort((a, b) => b.updatedAt - a.updatedAt);
+  for (const { key } of kept.slice(maxEntries)) removeKey(key);
+}
+
+function ensureChainsPruned() {
+  if (chainsPruned) return;
+  chainsPruned = true;
+  prunePersistedChains();
+}
+
 function loadPersistedChain(title, year) {
-  try {
-    const raw = localStorage.getItem(chainStorageKey(title, year));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed?.chain) && parsed.chain.length > 0 ? parsed.chain : null;
-  } catch {
-    // Storage non disponibile (modalità privata, quota esaurita, contesto
-    // senza `window`...): si ricalcola da zero, nessun crash per l'utente.
+  ensureChainsPruned();
+  const key = chainStorageKey(title, year);
+  const parsed = readJson(key, null);
+  if (!parsed || !Array.isArray(parsed.chain) || parsed.chain.length === 0) {
+    if (parsed) removeKey(key);
     return null;
   }
+  if (Date.now() - (Number(parsed.updatedAt) || 0) > CHAIN_TTL_MS) {
+    removeKey(key);
+    return null;
+  }
+  return parsed.chain;
 }
 
 function savePersistedChain(title, year, chain) {
-  try {
-    localStorage.setItem(chainStorageKey(title, year), JSON.stringify({ chain, updatedAt: Date.now() }));
-  } catch {
-    // Idem: se non si riesce a scrivere, l'app continua a funzionare,
-    // semplicemente senza il beneficio della cache tra una sessione e l'altra.
-  }
+  ensureChainsPruned();
+  const key = chainStorageKey(title, year);
+  const value = { chain, updatedAt: Date.now() };
+  if (writeJson(key, value)) return;
+  // Quota esaurita: libera metà delle catene e riprova una volta.
+  prunePersistedChains(Math.floor(CHAIN_MAX_ENTRIES / 2));
+  writeJson(key, value);
 }
 
 /**
@@ -322,12 +343,12 @@ function savePersistedChain(title, year, chain) {
  * frattempo una relazione sbagliata. Non lancia mai eccezioni.
  */
 export function clearPersistedAnilistChain(title, year) {
-  try {
-    localStorage.removeItem(chainStorageKey(title, year));
-    return true;
-  } catch {
-    return false;
-  }
+  if (typeof localStorage === 'undefined') return false;
+  const key = cacheKey(title, year);
+  removeKey(chainStorageKey(title, year));
+  searchCache.delete(key);
+  nodeCache.deleteMatching((k) => k === `search::${key}` || k === `year-only::${key}`);
+  return true;
 }
 
 const TV_FORMATS = new Set(['TV', 'TV_SHORT']);
@@ -372,20 +393,19 @@ const BY_ID_NODE_QUERY = `
   }
 `;
 
-const nodeCache = new Map(); // key -> { data, expiry } (key: "search::title::year" oppure "id::123")
+const nodeCache = new LruCache(MAX_CACHE_ENTRIES); // key: "search::title::year", "year-only::...", "id::123"
 const nodeInFlight = new Map(); // key -> Promise
 
 function fetchNodeCached(key, queryFn) {
   const cached = nodeCache.get(key);
-  if (cached && cached.expiry > Date.now()) return Promise.resolve(cached.data);
+  if (cached !== undefined) return Promise.resolve(cached);
 
   const pending = nodeInFlight.get(key);
   if (pending) return pending;
 
   const request = queryFn()
     .then((data) => {
-      nodeCache.set(key, { data, expiry: Date.now() + CACHE_TTL_MS });
-      pruneExpiredEntries(nodeCache);
+      nodeCache.set(key, data, CACHE_TTL_MS);
       return data;
     })
     .catch((err) => {
