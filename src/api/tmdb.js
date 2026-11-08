@@ -1,6 +1,7 @@
 // Le richieste passano dalla Pages Function /api/tmdb: il token TMDb resta
 // nei secret di Cloudflare e non viene mai inserito nel bundle del browser.
-import { LruCache } from '../utils/lruCache';
+import { LruCache } from '../utils/lruCache.js';
+import { isSafeHttpUrl } from '../utils/urlSafety.js';
 
 const BASE_URL = '/api/tmdb';
 
@@ -258,9 +259,20 @@ export async function fetchWatchProviders(id, mediaType, region = 'IT') {
     const buckets = ['flatrate', 'ads', 'free', 'rent', 'buy'];
     const names = new Set();
     buckets.forEach((bucket) => {
-      (forRegion[bucket] || []).forEach((p) => names.add(p.provider_name));
+      const providers = forRegion?.[bucket];
+      if (!Array.isArray(providers)) return;
+      providers.forEach((provider) => {
+        if (typeof provider?.provider_name === 'string' && provider.provider_name) {
+          names.add(provider.provider_name);
+        }
+      });
     });
-    return { names: Array.from(names), link: forRegion.link || null };
+    // Il link arriva da TMDb/JustWatch, cioè da dati esterni: non deve mai
+    // diventare una destinazione `javascript:` o di altro schema eseguibile.
+    const link = typeof forRegion.link === 'string' && isSafeHttpUrl(forRegion.link)
+      ? forRegion.link
+      : null;
+    return { names: Array.from(names), link };
   } catch {
     return { names: [], link: null };
   }

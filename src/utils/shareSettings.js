@@ -15,6 +15,7 @@
 // quindi non viene mai toccata da un'importazione di impostazioni.
 
 import { parseCustomConfig } from './customConfigParser.js';
+import { isSafeHttpUrl } from './urlSafety.js';
 import { MAINSTREAM_SERVICES } from './streamingServices.js';
 
 export const SHARE_SETTINGS_KEYS = ['language', 'theme', 'selectedMainstream', 'customServices'];
@@ -24,30 +25,24 @@ const VALID_THEMES = new Set(['auto', 'light', 'dark', 'amoled']);
 const MAINSTREAM_IDS = new Set(MAINSTREAM_SERVICES.map((service) => service.id));
 const MAX_CUSTOM_SERVICES = 30;
 const MAX_SHARE_PAYLOAD_LENGTH = 20_000;
-// Un link di condivisione è input non fidato: gli schemi che eseguono
-// codice non devono mai finire in un URL aperto da window.open.
-const UNSAFE_URL_SCHEME = /^\s*(?:javascript|data|vbscript)\s*:/i;
+const MAX_CUSTOM_URL_LENGTH = 2048;
 
 function sanitizeCustomService(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   if (typeof raw.id !== 'string' || !raw.id.trim()) return null;
   if (typeof raw.name !== 'string' || !raw.name.trim()) return null;
   if (typeof raw.baseUrl !== 'string' || !raw.baseUrl.trim()) return null;
-  if (UNSAFE_URL_SCHEME.test(raw.baseUrl)) return null;
+  // Un link di condivisione è input non fidato: l'URL base deve essere
+  // http(s) e i pattern sono validati da parseCustomConfig (che rifiuta
+  // schemi eseguibili, comprese le varianti con caratteri di controllo).
+  const baseUrl = raw.baseUrl.trim();
+  if (baseUrl.length > MAX_CUSTOM_URL_LENGTH || !isSafeHttpUrl(baseUrl)) return null;
   try {
-    const config = parseCustomConfig(JSON.stringify(raw.config ?? {}));
-    if (
-      [config.movie_pattern, config.episode_pattern, config.anime_pattern].some((pattern) =>
-        UNSAFE_URL_SCHEME.test(pattern)
-      )
-    ) {
-      return null;
-    }
     return {
-      id: raw.id.slice(0, 100),
-      name: raw.name.slice(0, 100),
-      baseUrl: raw.baseUrl.slice(0, 2048),
-      config,
+      id: raw.id.trim().slice(0, 100),
+      name: raw.name.trim().slice(0, 100),
+      baseUrl,
+      config: parseCustomConfig(JSON.stringify(raw.config ?? {})),
     };
   } catch {
     return null;
@@ -65,10 +60,15 @@ function sanitizeSettings(raw) {
     }
   }
   if (Array.isArray(raw.customServices)) {
-    const valid = raw.customServices
-      .map(sanitizeCustomService)
-      .filter(Boolean)
-      .slice(0, MAX_CUSTOM_SERVICES);
+    const valid = [];
+    const seenIds = new Set();
+    for (const candidate of raw.customServices) {
+      const service = sanitizeCustomService(candidate);
+      if (!service || seenIds.has(service.id)) continue;
+      seenIds.add(service.id);
+      valid.push(service);
+      if (valid.length >= MAX_CUSTOM_SERVICES) break;
+    }
     if (valid.length > 0 || raw.customServices.length === 0) {
       safe.customServices = valid;
     }

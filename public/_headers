@@ -1,0 +1,24 @@
+# Header di sicurezza serviti da Cloudflare Pages.
+#
+# La CSP consente solo ciò che l'app usa davvero:
+# - Google Fonts (stylesheet + file woff2);
+# - immagini TMDb;
+# - GraphQL AniList;
+# - il server di sincronizzazione scelto dall'utente, che può essere
+#   qualunque host HTTPS (per questo `https:` in connect-src) oppure un
+#   server HTTP su loopback.
+#
+# `style-src 'unsafe-inline'` è necessario perché MUI/Emotion inietta gli
+# stili a runtime; `script-src` resta limitato a 'self'. Non viene usato
+# `upgrade-insecure-requests` perché renderebbe irraggiungibile un server
+# di sync HTTP su localhost.
+
+/*
+  Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://image.tmdb.org; connect-src 'self' https://graphql.anilist.co https: http://localhost:* http://127.0.0.1:* http://[::1]:*; worker-src 'self'; manifest-src 'self'; media-src 'self'
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), display-capture=()
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  X-Frame-Options: DENY

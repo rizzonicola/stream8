@@ -29,9 +29,21 @@
 // {mal_id}, {title}: senza nessuno di questi non ci sarebbe modo di
 // identificare quale titolo aprire.
 
+import { isSafeHttpUrl, isSafeUrlTemplate } from './urlSafety.js';
+
 const ID_PLACEHOLDERS = ['{tmdb_id}', '{anilist_id}', '{mal_id}', '{title}'];
 
 export class CustomConfigError extends Error {}
+
+// L'indirizzo base è inserito dall'utente o arriva da un file/link: deve
+// essere un URL assoluto http(s), non uno schema eseguibile o relativo.
+export function validateCustomServiceBaseUrl(baseUrl) {
+  if (!isSafeHttpUrl(baseUrl)) {
+    throw new CustomConfigError(
+      'L\'indirizzo base deve essere un URL valido che inizia con http:// o https://.'
+    );
+  }
+}
 
 export function parseCustomConfig(jsonText) {
   let parsed;
@@ -52,6 +64,11 @@ export function parseCustomConfig(jsonText) {
     if (!ID_PLACEHOLDERS.some((ph) => parsed[key].includes(ph))) {
       throw new CustomConfigError(
         `Il pattern "${key}" deve contenere almeno uno tra: ${ID_PLACEHOLDERS.join(', ')}.`
+      );
+    }
+    if (!isSafeUrlTemplate(parsed[key])) {
+      throw new CustomConfigError(
+        `Il pattern "${key}" deve produrre un URL http:// o https:// valido.`
       );
     }
   }
@@ -85,8 +102,14 @@ export function downloadJsonFile(filename, jsonText) {
   URL.revokeObjectURL(url);
 }
 
+const MAX_JSON_FILE_BYTES = 2 * 1024 * 1024;
+
 export function readJsonFile(file) {
   return new Promise((resolve, reject) => {
+    if (!file || file.size > MAX_JSON_FILE_BYTES) {
+      reject(new CustomConfigError('Il file JSON è troppo grande (massimo 2 MB).'));
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
     reader.onerror = () => reject(new Error('Impossibile leggere il file.'));
@@ -115,7 +138,11 @@ export async function fetchJsonFromUrl(url) {
   if (!res.ok) {
     throw new CustomConfigError(`Il server ha risposto con un errore (HTTP ${res.status}).`);
   }
-  return res.text();
+  const text = await res.text();
+  if (text.length > MAX_JSON_FILE_BYTES) {
+    throw new CustomConfigError('Il file JSON è troppo grande (massimo 2 MB).');
+  }
+  return text;
 }
 
 // Vero se il pattern richiede una risoluzione AniList/MAL: usato per

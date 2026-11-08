@@ -35,6 +35,7 @@ import { useConnectionHints } from '../hooks/useConnectionHints';
 import WatchOnDialog from '../components/WatchOnDialog';
 import { MAINSTREAM_SEARCH_PATTERN } from '../utils/streamingServices';
 import { buildCustomUrl, pickPatternForItem } from '../utils/customConfigParser';
+import { parseHttpUrl } from '../utils/urlSafety';
 import { clearPersistedAnilistChain } from '../api/anilist';
 
 // Alcuni titoli di episodi/stagioni sono molto lunghi (es. anime lunghi
@@ -179,41 +180,52 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
         // Se TMDb fornisce il link "watch" (JustWatch) per la regione, è la
         // via più vicina a un deep-link reale verso il servizio scelto;
         // altrimenti si ripiega su una ricerca per titolo sul sito stesso.
+        const searchPattern = MAINSTREAM_SEARCH_PATTERN[service.id];
         if (watchLink) {
           url = watchLink;
-        } else {
+        } else if (typeof searchPattern === 'string') {
           const query = encodeURIComponent(target.title);
-          url = MAINSTREAM_SEARCH_PATTERN[service.id].replace('{query}', query);
+          url = searchPattern.replace('{query}', query);
         }
-        addEntry({
-          ...target,
-          viaService: service.name,
-          season: isSeries ? season : undefined,
-          episode: isSeries ? episode : undefined,
-        });
       } else {
-        const pattern = pickPatternForItem(service.config, target);
-        url = buildCustomUrl({
-          pattern,
-          baseUrl: service.baseUrl,
-          tmdbId: target.id,
-          season: isSeries ? season : undefined,
-          episode: isSeries ? episode : undefined,
-          anilistId: anilist?.anilistId,
-          malId: anilist?.malId,
-          title: target.title,
-        });
-        addEntry({
-          ...target,
-          viaService: service.name,
-          season: isSeries ? season : undefined,
-          episode: isSeries ? episode : undefined,
-        });
+        const pattern = pickPatternForItem(service.config || {}, target);
+        if (typeof pattern === 'string' && typeof service.baseUrl === 'string') {
+          url = buildCustomUrl({
+            pattern,
+            baseUrl: service.baseUrl,
+            tmdbId: target.id,
+            season: isSeries ? season : undefined,
+            episode: isSeries ? episode : undefined,
+            anilistId: anilist?.anilistId,
+            malId: anilist?.malId,
+            title: target.title,
+          });
+        }
       }
+
+      // Punto unico in cui un URL esterno viene aperto: qualunque sia la
+      // provenienza (link TMDb, ricerca mainstream o pattern personalizzato
+      // anche importato da un link condiviso), qui si accettano solo URL
+      // http(s). I relativi vengono risolti rispetto all'app.
+      const safeUrl = parseHttpUrl(url, window.location.href);
+      if (!safeUrl) {
+        console.warn('[Stream8] destinazione non valida, apertura annullata:', url);
+        pendingTab?.close();
+        setWatchOpen(false);
+        return;
+      }
+
+      addEntry({
+        ...target,
+        viaService: service.name,
+        season: isSeries ? season : undefined,
+        episode: isSeries ? episode : undefined,
+      });
+
       if (pendingTab && !pendingTab.closed) {
-        pendingTab.location.href = url;
+        pendingTab.location.href = safeUrl.href;
       } else {
-        window.open(url, '_blank', 'noopener,noreferrer');
+        window.open(safeUrl.href, '_blank', 'noopener,noreferrer');
       }
       setWatchOpen(false);
     },

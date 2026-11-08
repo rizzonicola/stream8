@@ -19,6 +19,7 @@ import { MAINSTREAM_SERVICES, MAINSTREAM_TMDB_PROVIDER_NAMES } from '../utils/st
 import { fetchWatchProviders, fetchDetails } from '../api/tmdb';
 import { searchAnilistMedia, resolveAnilistForSeason } from '../api/anilist';
 import { pickPatternForItem, patternNeedsAnilist } from '../utils/customConfigParser';
+import { isSafeHttpUrl, isSafeUrlTemplate } from '../utils/urlSafety';
 import { t } from '../i18n';
 
 // Piccola funzione pura (non dipende dallo stato del componente): tenerla
@@ -140,7 +141,19 @@ function WatchOnDialog({
   };
 
   const handlePickCustom = async (svc) => {
-    const pattern = pickPatternForItem(svc.config, item);
+    const pattern = pickPatternForItem(svc.config || {}, item);
+    // Difesa in profondità: la stessa validazione viene ripetuta al
+    // momento dell'apertura, ma qui evitiamo già di avviare una scheda
+    // vuota e una risoluzione AniList per una configurazione che non
+    // potrebbe mai produrre un URL http(s) sicuro.
+    if (
+      typeof pattern !== 'string' ||
+      !isSafeHttpUrl(svc.baseUrl) ||
+      !isSafeUrlTemplate(pattern)
+    ) {
+      setCustomUnavailableIds((prev) => new Set(prev).add(svc.id));
+      return;
+    }
     if (!patternNeedsAnilist(pattern)) {
       // Nessuna risoluzione esterna necessaria: nessuna richiesta di rete
       // aggiuntiva, come deve essere quando questa funzione non serve.

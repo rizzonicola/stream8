@@ -6,10 +6,43 @@
 // interrogato a meno che l'utente non abbia esplicitamente attivato e
 // configurato la sincronizzazione nelle Impostazioni.
 
+import { parseHttpUrl } from '../utils/urlSafety.js';
+
 const REQUEST_TIMEOUT_MS = 10_000;
 
+function isLoopbackHost(hostname) {
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '::1' ||
+    hostname === '[::1]'
+  );
+}
+
+// Normalizza e valida l'indirizzo del server di sincronizzazione. Il server
+// è scelto dall'utente, ma resta un input non fidato: niente schemi
+// eseguibili, credenziali incorporate, query o frammenti, e niente HTTP
+// in chiaro quando l'app è servita in HTTPS (salvo loopback, l'unico caso
+// in cui un server locale può non avere TLS).
 function normalizeBaseUrl(serverUrl) {
-  return serverUrl.replace(/\/+$/, '');
+  const url = parseHttpUrl(serverUrl);
+  if (!url) {
+    throw new SyncError('L\'indirizzo del server deve essere un URL valido http:// o https://.');
+  }
+  if (url.search || url.hash) {
+    throw new SyncError('L\'indirizzo del server non deve contenere parametri o frammenti.');
+  }
+  if (
+    typeof window !== 'undefined' &&
+    window.location?.protocol === 'https:' &&
+    url.protocol === 'http:' &&
+    !isLoopbackHost(url.hostname)
+  ) {
+    throw new SyncError(
+      'Un server HTTP è accettato solo su localhost quando l\'app è servita in HTTPS.'
+    );
+  }
+  return url.origin + url.pathname.replace(/\/+$/, '');
 }
 
 async function fetchWithTimeout(url, options = {}) {
@@ -36,9 +69,12 @@ function logSync(level, ...args) {
 // Verifica che l'URL inserito dall'utente punti a un server Stream8 Sync
 // raggiungibile, prima di salvare le impostazioni.
 export async function checkSyncServer(serverUrl) {
+  // La validazione avviene prima della richiesta: un URL non valido deve
+  // produrre un errore chiaro senza nemmeno tentare una connessione.
+  const baseUrl = normalizeBaseUrl(serverUrl);
   let res;
   try {
-    res = await fetchWithTimeout(`${normalizeBaseUrl(serverUrl)}/v1/health`);
+    res = await fetchWithTimeout(`${baseUrl}/v1/health`);
   } catch (err) {
     logSync('error', 'health check fallito:', err);
     throw new SyncError('Server non raggiungibile: controlla l\'indirizzo e che sia online.');
@@ -59,9 +95,10 @@ export async function checkSyncServer(serverUrl) {
 }
 
 async function authorizedFetch(serverUrl, apiKey, path, options = {}) {
+  const baseUrl = normalizeBaseUrl(serverUrl);
   let res;
   try {
-    res = await fetchWithTimeout(`${normalizeBaseUrl(serverUrl)}${path}`, {
+    res = await fetchWithTimeout(`${baseUrl}${path}`, {
       ...options,
       headers: {
         Authorization: `Bearer ${apiKey}`,

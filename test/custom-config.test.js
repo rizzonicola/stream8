@@ -6,6 +6,7 @@ import {
   parseCustomConfig,
   pickPatternForItem,
   serializeCustomConfig,
+  validateCustomServiceBaseUrl,
 } from '../src/utils/customConfigParser.js';
 
 const CONFIG = {
@@ -29,6 +30,47 @@ test('parseCustomConfig rifiuta un pattern senza segnaposto identificativo', () 
     () => parseCustomConfig(JSON.stringify({ ...CONFIG, movie_pattern: '{base_url}/movie' })),
     CustomConfigError
   );
+});
+
+test('parseCustomConfig rifiuta pattern con schemi eseguibili o caratteri di controllo', () => {
+  const unsafePatterns = [
+    'javascript:{title}',
+    'java\tscript:{title}',
+    'java\nscript:{title}',
+    '\u0000javascript:{title}',
+    'data:text/html,{title}',
+    'vbscript:{title}',
+  ];
+  for (const moviePattern of unsafePatterns) {
+    assert.throws(
+      () =>
+        parseCustomConfig(JSON.stringify({ ...CONFIG, movie_pattern: moviePattern })),
+      CustomConfigError,
+      `doveva essere rifiutato: ${JSON.stringify(moviePattern)}`
+    );
+  }
+});
+
+test('validateCustomServiceBaseUrl accetta solo URL http(s) assoluti senza credenziali', () => {
+  assert.doesNotThrow(() => validateCustomServiceBaseUrl('https://example.test/base'));
+  assert.doesNotThrow(() => validateCustomServiceBaseUrl('http://192.168.1.10:8096'));
+
+  const rejected = [
+    'javascript:alert(1)',
+    'java\tscript:alert(1)',
+    '\u0000javascript:alert(1)',
+    'data:text/html,x',
+    'ftp://example.test',
+    '/solo/percorso',
+    'https://user:pass@example.test',
+  ];
+  for (const value of rejected) {
+    assert.throws(
+      () => validateCustomServiceBaseUrl(value),
+      CustomConfigError,
+      `doveva essere rifiutato: ${JSON.stringify(value)}`
+    );
+  }
 });
 
 test('buildCustomUrl sostituisce i segnaposto e normalizza lo slash finale', () => {

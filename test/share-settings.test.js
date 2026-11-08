@@ -77,6 +77,63 @@ test('decodeSettingsPayload rifiuta URL con schemi eseguibili', () => {
   assert.equal(decoded, null);
 });
 
+test('decodeSettingsPayload rifiuta varianti con tab, newline e NUL', () => {
+  const variants = [
+    'java\tscript:alert(1)//',
+    'java\nscript:alert(1)//',
+    '\u0000javascript:alert(1)//',
+  ];
+  for (const baseUrl of variants) {
+    assert.equal(
+      decodeSettingsPayload(
+        rawPayload({
+          customServices: [{ id: 'x', name: 'X', baseUrl, config: CONFIG }],
+        })
+      ),
+      null,
+      `baseUrl doveva essere rifiutato: ${JSON.stringify(baseUrl)}`
+    );
+  }
+
+  for (const moviePattern of ['java\tscript:{title}', '\u0000javascript:{title}']) {
+    assert.equal(
+      decodeSettingsPayload(
+        rawPayload({
+          customServices: [
+            {
+              id: 'x',
+              name: 'X',
+              baseUrl: 'https://example.test',
+              config: { ...CONFIG, movie_pattern: moviePattern },
+            },
+          ],
+        })
+      ),
+      null,
+      `pattern doveva essere rifiutato: ${JSON.stringify(moviePattern)}`
+    );
+  }
+});
+
+test('decodeSettingsPayload scarta servizi duplicati e URL base troppo lunghi', () => {
+  const decoded = decodeSettingsPayload(
+    rawPayload({
+      customServices: [
+        { id: 'dup', name: 'Primo', baseUrl: 'https://example.test', config: CONFIG },
+        { id: 'dup', name: 'Secondo', baseUrl: 'https://evil.test', config: CONFIG },
+        {
+          id: 'lungo',
+          name: 'Lungo',
+          baseUrl: `https://example.test/${'a'.repeat(2100)}`,
+          config: CONFIG,
+        },
+      ],
+    })
+  );
+  assert.equal(decoded.customServices.length, 1);
+  assert.equal(decoded.customServices[0].name, 'Primo');
+});
+
 test('decodeSettingsPayload scarta un payload fatto a mano con soli campi non validi', () => {
   assert.equal(
     decodeSettingsPayload(

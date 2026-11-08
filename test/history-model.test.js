@@ -46,6 +46,62 @@ test('normalizeHistory scarta voci prive di identità valida', () => {
   );
 });
 
+test('normalizeHistory normalizza i campi numerici e non lascia passare tipi che fanno crashare la UI', () => {
+  const [entry] = normalizeHistory([
+    {
+      ...base,
+      id: '10',
+      year: '2023',
+      voteAverage: '8.7',
+      genreIds: ['16', 99, null, {}],
+      genreNames: ['Animazione', 42, '  Dramma  ', {}],
+      numberOfSeasons: '2',
+      numberOfEpisodes: '24.5',
+      runtimeMinutes: {},
+      viaService: { name: 'Netflix' },
+      watchedAt: '12345',
+    },
+  ]);
+
+  assert.equal(entry.id, 10);
+  assert.equal(entry.year, 2023);
+  assert.equal(entry.voteAverage, 8.7);
+  assert.equal(typeof entry.voteAverage, 'number');
+  assert.deepEqual(entry.genreIds, [16, 99]);
+  assert.deepEqual(entry.genreNames, ['Animazione', 'Dramma']);
+  assert.equal(entry.numberOfSeasons, 2);
+  assert.equal('numberOfEpisodes' in entry, false);
+  assert.equal('runtimeMinutes' in entry, false);
+  assert.equal('viaService' in entry, false);
+  assert.equal(entry.watchedAt, 12345);
+});
+
+test('normalizeHistory scarta percorsi immagine e chiavi non conformi', () => {
+  const [entry] = normalizeHistory([
+    {
+      ...base,
+      posterPath: 'javascript:alert(1)',
+      backdropPath: '/valido.jpg',
+      _key: 'chiave-arbitraria',
+    },
+  ]);
+  assert.equal('posterPath' in entry, false);
+  assert.equal(entry.backdropPath, '/valido.jpg');
+  assert.equal(entry._key, 'tv-10-1-2');
+
+  assert.deepEqual(
+    normalizeHistory([{ _key: { non: 'stringa' }, watchedAt: 1, deleted: true }]),
+    []
+  );
+});
+
+test('normalizeHistory e groupHistoryByShow tollerano input non array', () => {
+  assert.deepEqual(normalizeHistory(null), []);
+  assert.deepEqual(normalizeHistory({ entries: [] }), []);
+  assert.deepEqual(groupHistoryByShow(null), []);
+  assert.deepEqual(mergeHistories(null, { entries: [] }), []);
+});
+
 test('mergeHistories fa vincere il tombstone più recente sulla visione vecchia', () => {
   const local = [{ _key: 'movie-5--', watchedAt: 300, deleted: true }];
   const remote = [{ _key: 'movie-5--', mediaType: 'movie', id: 5, title: 'Film', watchedAt: 100 }];

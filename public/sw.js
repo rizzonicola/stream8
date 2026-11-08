@@ -14,7 +14,19 @@
 // v2). Senza questo passaggio gli utenti che hanno già installato la PWA
 // continuerebbero a vedere la shell precedente finché la cache non scade.
 
-const CACHE_NAME = 'stream8-shell-v3';
+const CACHE_NAME = 'stream8-shell-v4';
+
+// Solo asset statici: le risposte a richieste `fetch()` generiche (API,
+// documenti, dati) non devono finire nella cache dello shell. Le richieste
+// autenticate sono escluse esplicitamente più sotto.
+const CACHEABLE_DESTINATIONS = new Set([
+  'script',
+  'style',
+  'image',
+  'font',
+  'manifest',
+  'worker',
+]);
 
 // Risorse con nome file fisso, note in anticipo: precaricate subito
 // all'installazione per garantire il funzionamento offline fin da subito.
@@ -57,9 +69,11 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // Mai in cache: qualsiasi richiesta cross-origin (incluse le immagini
-  // image.tmdb.org) e le chiamate API stessa origine (/api/*, che passano
-  // dalla Pages Function) restano sempre network-only.
+  // Mai in cache: richieste autenticate (la sync usa Authorization verso un
+  // server dell'utente), qualsiasi richiesta cross-origin e le chiamate API
+  // stessa origine (/api/*, che passano dalla Pages Function).
+  if (request.headers.has('Authorization')) return;
+  if (request.headers.has('Range')) return;
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) return;
 
@@ -76,13 +90,29 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Asset statici stessa origine (JS/CSS/font/icone): stale-while-revalidate.
+  // Non intercettiamo richieste `fetch()` generiche: senza questo filtro una
+  // risposta HTML di fallback potrebbe essere salvata sotto il nome di un
+  // asset e servita al posto suo.
+  if (!CACHEABLE_DESTINATIONS.has(request.destination)) return;
+
   event.respondWith(
     caches.open(CACHE_NAME).then(async (cache) => {
       const cached = await cache.match(request);
       const networkFetch = fetch(request)
-        .then((response) => {
-          if (response && response.status === 200) {
-            cache.put(request, response.clone());
+        .then(async (response) => {
+          const cacheControl = response?.headers.get('Cache-Control') || '';
+          const cacheable =
+            response &&
+            response.status === 200 &&
+            !response.redirected &&
+            response.type === 'basic' &&
+            !/no-store/i.test(cacheControl);
+          if (cacheable) {
+            try {
+              await cache.put(request, response.clone());
+            } catch {
+              // Quota o storage non disponibile: la risposta di rete resta valida.
+            }
           }
           return response;
         })

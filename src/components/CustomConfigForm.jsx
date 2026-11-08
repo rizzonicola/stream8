@@ -29,6 +29,7 @@ import {
   fetchJsonFromUrl,
   parseCustomConfig,
   readJsonFile,
+  validateCustomServiceBaseUrl,
 } from '../utils/customConfigParser';
 import JsonConfigEditor from './customConfig/JsonConfigEditor';
 import { formCardSx, iconBadgeSx, infoNoteSx } from './customConfig/styles';
@@ -148,6 +149,13 @@ export default function CustomConfigForm({ lang, onAdd, onCancel }) {
     }
     if (source === 'editor' && !editorText.trim()) {
       setError(t(lang, 'custom_editor_empty'));
+      return;
+    }
+
+    try {
+      validateCustomServiceBaseUrl(baseUrl.trim());
+    } catch (e) {
+      setError(e.message);
       return;
     }
 

@@ -4,12 +4,74 @@
 // viene mai inviato al browser. Il frontend chiama /api/tmdb/... e questa
 // Function aggiunge l'header Authorization lato server.
 //
-// Sono consentiti solo gli endpoint realmente usati dall'app: in questo modo
-// la Function non diventa un proxy generico verso qualunque API TMDb.
+// Sono consentiti solo gli endpoint e i parametri realmente usati dall'app:
+// in questo modo la Function non diventa un proxy generico verso qualunque
+// API TMDb né un modo per generare varianti arbitrarie che consumano quota
+// e bypassano la cache edge. Un rate limit per IP va comunque configurato
+// lato Cloudflare (WAF/Rate Limiting): un contatore in memoria dentro un
+// Worker non sarebbe globale né affidabile.
 
 const TMDB_BASE = 'https://api.themoviedb.org/3';
-const ALLOWED_PREFIXES = ['/discover/', '/movie/', '/tv/', '/search/'];
 const CACHE_TTL_SECONDS = 300;
+
+const LANGUAGE = /^[a-z]{2}(?:-[A-Z]{2})?$/;
+const REGION = /^[A-Z]{2}$/;
+const SORT_BY = new Set(['popularity.desc', 'first_air_date.desc']);
+const GENRE_LIST = /^\d{1,3}(?:,\d{1,3})*$/;
+const ORIGINAL_LANGUAGE = /^[a-z]{2}$/;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const VOTE_COUNT = /^\d{1,6}$/;
+const QUERY_MAX_LENGTH = 200;
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+
+// Endpoint e parametri accettati, nella forma esatta usata da src/api/tmdb.js.
+const ALLOWED_ROUTES = [
+  {
+    pattern: /^\/discover\/movie$/,
+    params: new Set(['language', 'sort_by', 'vote_count.gte']),
+  },
+  {
+    pattern: /^\/discover\/tv$/,
+    params: new Set([
+      'language',
+      'sort_by',
+      'vote_count.gte',
+      'without_genres',
+      'with_genres',
+      'with_original_language',
+      'first_air_date.lte',
+    ]),
+  },
+  { pattern: /^\/movie\/now_playing$/, params: new Set(['language', 'region']) },
+  { pattern: /^\/tv\/on_the_air$/, params: new Set(['language']) },
+  { pattern: /^\/search\/multi$/, params: new Set(['language', 'query']) },
+  { pattern: /^\/movie\/\d{1,10}$/, params: new Set(['language']) },
+  { pattern: /^\/tv\/\d{1,10}$/, params: new Set(['language']) },
+  { pattern: /^\/movie\/\d{1,10}\/credits$/, params: new Set(['language']) },
+  { pattern: /^\/tv\/\d{1,10}\/credits$/, params: new Set(['language']) },
+  { pattern: /^\/tv\/\d{1,10}\/season\/\d{1,3}$/, params: new Set(['language']) },
+  {
+    pattern: /^\/movie\/\d{1,10}\/watch\/providers$/,
+    params: new Set(),
+  },
+  {
+    pattern: /^\/tv\/\d{1,10}\/watch\/providers$/,
+    params: new Set(),
+  },
+];
+
+const PARAM_VALIDATORS = {
+  language: (value) => LANGUAGE.test(value),
+  region: (value) => REGION.test(value),
+  query: (value) =>
+    value.length > 0 && value.length <= QUERY_MAX_LENGTH && !CONTROL_CHARS.test(value),
+  sort_by: (value) => SORT_BY.has(value),
+  'vote_count.gte': (value) => VOTE_COUNT.test(value),
+  without_genres: (value) => GENRE_LIST.test(value),
+  with_genres: (value) => GENRE_LIST.test(value),
+  with_original_language: (value) => ORIGINAL_LANGUAGE.test(value),
+  'first_air_date.lte': (value) => DATE.test(value),
+};
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -25,17 +87,22 @@ export async function onRequest(context) {
     return json({ error: 'Not found' }, 404);
   }
 
+  const search = sanitizedSearch(url.searchParams, allowedParams(path));
+  if (search === null) {
+    return json({ error: 'Invalid query parameters' }, 400);
+  }
+
   if (!env.TMDB_TOKEN) {
     console.error('TMDB_TOKEN is not configured');
     return json({ error: 'Server configuration error' }, 500);
   }
 
   const target = new URL(TMDB_BASE + path);
-  target.search = url.search;
+  target.search = search.toString();
 
   // Cache breve lato edge: riduce le chiamate a TMDb senza servire dati
-  // troppo vecchi. La cache è per URL (i parametri lingua/regione sono
-  // inclusi nella query string).
+  // troppo vecchi. I parametri sono normalizzati (ordine stabile, nessun
+  // duplicato), quindi varianti equivalenti condividono la stessa cache key.
   const cache = caches.default;
   const cacheKey = new Request(target.toString(), { method: 'GET' });
   const cached = await cache.match(cacheKey);
@@ -61,6 +128,7 @@ export async function onRequest(context) {
         'Content-Type': 'application/json; charset=utf-8',
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'no-referrer',
       },
     });
   }
@@ -71,6 +139,8 @@ export async function onRequest(context) {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': `public, max-age=${CACHE_TTL_SECONDS}`,
       'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+      'Cross-Origin-Resource-Policy': 'same-origin',
     },
   });
 
@@ -84,15 +154,22 @@ function json(body, status = 200, extraHeaders = {}) {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
       ...extraHeaders,
     },
   });
 }
 
+function allowedParams(path) {
+  const route = ALLOWED_ROUTES.find((candidate) => candidate.pattern.test(path));
+  return route ? route.params : null;
+}
+
 // Valida e normalizza il percorso richiesto. Restituisce null se non è uno
 // degli endpoint TMDb usati dall'app. Il controllo avviene sul percorso
-// decodificato e ogni segmento deve essere alfanumerico: così varianti
-// percent-encoded (es. %2e%2e) non possono uscire dall'allowlist.
+// decodificato: varianti percent-encoded (es. %2e%2e) non possono quindi
+// uscire dall'allowlist.
 function normalizedPath(path) {
   if (!path.startsWith('/')) return null;
 
@@ -107,14 +184,25 @@ function normalizedPath(path) {
     return null;
   }
 
-  if (!ALLOWED_PREFIXES.some((prefix) => decoded.startsWith(prefix))) {
-    return null;
-  }
+  return allowedParams(decoded) ? decoded : null;
+}
 
-  const segments = decoded.split('/').slice(1);
-  if (!segments.every((segment) => /^[A-Za-z0-9_-]+$/.test(segment))) {
-    return null;
-  }
+// Costruisce una query string con soli parametri ammessi per quel path.
+// Duplicati e nomi sconosciuti vengono rifiutati (non ignorati): un client
+// legittimo non ne ha bisogno e accettarli renderebbe ambiguo il cache key.
+function sanitizedSearch(searchParams, allowed) {
+  if (!allowed) return null;
+  const entries = [...searchParams.entries()];
+  entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 
-  return decoded;
+  const result = new URLSearchParams();
+  const seen = new Set();
+  for (const [name, value] of entries) {
+    if (!allowed.has(name) || seen.has(name)) return null;
+    const validate = PARAM_VALIDATORS[name];
+    if (!validate || !validate(value)) return null;
+    seen.add(name);
+    result.append(name, value);
+  }
+  return result;
 }

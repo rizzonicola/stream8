@@ -26,6 +26,7 @@ import {
   downloadJsonFile,
   parseCustomConfig,
   serializeCustomConfig,
+  validateCustomServiceBaseUrl,
 } from '../utils/customConfigParser';
 import JsonConfigEditor from './customConfig/JsonConfigEditor';
 import { infoNoteSx } from './customConfig/styles';
@@ -87,6 +88,7 @@ export default function EditCustomServiceDialog({ lang, service, onClose, onSave
       return;
     }
     try {
+      validateCustomServiceBaseUrl(baseUrl.trim());
       onSave({
         ...service,
         name: name.trim(),
