@@ -10,7 +10,6 @@ import {
 } from '@mui/material';
 import ArrowBackIosNewRoundedIcon from '@mui/icons-material/ArrowBackIosNewRounded';
 import ArrowForwardIosRoundedIcon from '@mui/icons-material/ArrowForwardIosRounded';
-import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded';
 import StarRoundedIcon from '@mui/icons-material/StarRounded';
 import {
   backdropUrl,
@@ -273,12 +272,11 @@ export default function HeroSlider({ lang, items, onSelect, onPrefetch }) {
         <Button
           variant="contained"
           size="large"
-          startIcon={<PlayArrowRoundedIcon />}
           onClick={(event) => {
             event.stopPropagation();
             onSelect(current);
           }}>
-          {t(lang, 'hero_watch_on')}
+          {t(lang, 'hero_view_details')}
         </Button>
 
         {/* Puntini compatti su telefono: stessa idea di prima, ma senza il
