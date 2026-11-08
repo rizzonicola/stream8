@@ -9,6 +9,7 @@ export const ROUTES = {
   MOVIES: '/movies',
   SERIES: '/series',
   ANIME: '/anime',
+  SEARCH: '/search',
   HISTORY: '/history',
   SETTINGS: '/settings',
   INFO: '/info',

@@ -19,6 +19,7 @@ function MediaCard({
   fullWidth = false,
   scrollerRef,
   onPrefetch,
+  secondaryText,
 }) {
   const [failedPath, setFailedPath] = useState(null);
   const [cardRef, near] = useNearViewport({
@@ -179,9 +180,9 @@ function MediaCard({
           }}>
           {item.title}
         </Typography>
-        {item.year && (
+        {(secondaryText || item.year) && (
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
-            {item.year}
+            {secondaryText || item.year}
           </Typography>
         )}
       </Box>

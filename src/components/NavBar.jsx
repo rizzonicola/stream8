@@ -213,14 +213,12 @@ function NavBar({
               </Tabs>
 
               <Stack direction="row" spacing={0.25} sx={{ flexShrink: 0 }}>
-                <Tooltip title={t(lang, 'search_placeholder')}>
+                <Tooltip title={t(lang, 'search')}>
                   <IconButton
                     onClick={onOpenSearch}
                     aria-label={t(lang, 'search')}
-                    sx={{
-                      color: 'text.secondary',
-                      '&:hover': { color: 'text.primary', bgcolor: 'action.hover' },
-                    }}>
+                    aria-current={activePage === 'search' ? 'page' : undefined}
+                    sx={secondaryButtonSx(activePage === 'search')}>
                     <SearchRoundedIcon />
                   </IconButton>
                 </Tooltip>
@@ -242,7 +240,8 @@ function NavBar({
               <IconButton
                 onClick={onOpenSearch}
                 aria-label={t(lang, 'search')}
-                sx={{ color: 'text.secondary' }}>
+                aria-current={activePage === 'search' ? 'page' : undefined}
+                sx={secondaryButtonSx(activePage === 'search')}>
                 <SearchRoundedIcon />
               </IconButton>
               <IconButton
@@ -305,6 +304,20 @@ function NavBar({
             <Divider />
 
             <List sx={{ px: 1, py: 1.5 }}>
+              <ListItemButton
+                selected={activePage === 'search'}
+                onClick={() => {
+                  onOpenSearch();
+                  setDrawerOpen(false);
+                }}>
+                <ListItemIcon sx={{ minWidth: 40, color: 'inherit' }}>
+                  <SearchRoundedIcon />
+                </ListItemIcon>
+                <ListItemText
+                  primary={t(lang, 'search')}
+                  primaryTypographyProps={{ fontWeight: 600, fontSize: '0.9375rem' }}
+                />
+              </ListItemButton>
               {secondaryItems.map((item) => (
                 <ListItemButton
                   key={item.key}

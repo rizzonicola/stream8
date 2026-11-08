@@ -102,6 +102,8 @@ export function normalizeItem(raw, mediaType) {
     posterPath: raw.poster_path || null,
     backdropPath: raw.backdrop_path || null,
     voteAverage: raw.vote_average || 0,
+    voteCount: raw.vote_count || 0,
+    releaseDate: date || '',
     genreIds: raw.genre_ids || [],
     genreNames: Array.isArray(raw.genres) ? raw.genres.map((g) => g.name) : [],
     numberOfSeasons: raw.number_of_seasons || null,
@@ -180,8 +182,13 @@ export async function fetchRecentAnimeForHero(lang) {
 }
 
 export async function searchMulti(query, lang, options = {}) {
-  const data = await tmdbFetch('/search/multi', { query, language: lang }, options);
-  return (data.results || [])
+  const { signal, page = 1 } = options;
+  const data = await tmdbFetch(
+    '/search/multi',
+    { query, language: lang, page },
+    { signal }
+  );
+  const items = (data.results || [])
     .filter((r) => r.media_type === 'movie' || r.media_type === 'tv')
     .map((r) => {
       // TMDb non ha un "media_type" per l'anime: restituisce solo
@@ -201,6 +208,13 @@ export async function searchMulti(query, lang, options = {}) {
         r.original_language === 'ja';
       return normalizeItem(r, isAnime ? 'anime' : r.media_type);
     });
+
+  return {
+    items,
+    page: Number(data.page) || page,
+    totalPages: Number(data.total_pages) || 1,
+    totalResults: Number(data.total_results) || 0,
+  };
 }
 
 export async function fetchDetails(id, mediaType, lang) {

@@ -9,7 +9,6 @@ import OnboardingDialog from './components/OnboardingDialog';
 import ConsentDialog from './components/ConsentDialog';
 import ImportSettingsDialog from './components/ImportSettingsDialog';
 import NavBar from './components/NavBar';
-import SearchDialog from './components/SearchDialog';
 import {
   useRouter,
   detailPath,
@@ -29,6 +28,7 @@ const DetailPage = lazy(() => import('./pages/DetailPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const InfoPage = lazy(() => import('./pages/InfoPage'));
 const HistoryPage = lazy(() => import('./pages/HistoryPage'));
+const SearchPage = lazy(() => import('./pages/SearchPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 function PageLoader() {
@@ -43,7 +43,6 @@ function AppShell() {
   const { settings, completeOnboarding, importSettings } = useSettings();
   const { hasDecided, setHistoryConsent } = useConsent();
   const { path, navigate, replace, state } = useRouter();
-  const [searchOpen, setSearchOpen] = React.useState(false);
   const isOnline = useOnlineStatus();
 
   // ---- Importazione impostazioni da link condiviso (vedi utils/shareSettings.js) ----
@@ -110,6 +109,7 @@ function AppShell() {
   const isSettings = pathname === ROUTES.SETTINGS;
   const isInfo = pathname === ROUTES.INFO;
   const isHistory = pathname === ROUTES.HISTORY;
+  const isSearch = pathname === ROUTES.SEARCH;
   const isImportRoute = pathname === ROUTES.IMPORT_SETTINGS;
 
   // Le tab di contenuto (Home/Film/Serie/Anime) devono risultare selezionate
@@ -127,6 +127,7 @@ function AppShell() {
     isSettings ||
     isInfo ||
     isHistory ||
+    isSearch ||
     isImportRoute ||
     Boolean(detailParams);
 
@@ -138,7 +139,9 @@ function AppShell() {
       ? 'info'
       : isHistory
         ? 'history'
-        : undefined;
+        : isSearch
+          ? 'search'
+          : undefined;
 
   const openDetail = useCallback((item) => navigate(detailPath(item), item), [navigate]);
   const changeView = useCallback((v) => navigate(viewToRoute(v)), [navigate]);
@@ -146,12 +149,11 @@ function AppShell() {
   const openInfo = useCallback(() => navigate(ROUTES.INFO), [navigate]);
   const openHistory = useCallback(() => navigate(ROUTES.HISTORY), [navigate]);
   const goHome = useCallback(() => navigate(ROUTES.HOME), [navigate]);
-  const openSearch = useCallback(() => setSearchOpen(true), []);
+  const openSearch = useCallback(() => navigate(ROUTES.SEARCH), [navigate]);
   const prefetchDetail = useCallback(() => {
     import('./pages/DetailPage').catch(() => {});
   }, []);
   const goBack = useCallback(() => window.history.back(), []);
-  const closeSearch = useCallback(() => setSearchOpen(false), []);
 
   // Tiene stagione/episodio sincronizzati nell'URL mentre si è sulla pagina
   // di dettaglio (replaceState: non aggiunge voci alla cronologia del
@@ -194,6 +196,16 @@ function AppShell() {
     if (isInfo) return <InfoPage lang={lang} />;
     if (isHistory)
       return <HistoryPage lang={lang} onOpenDetail={openDetail} onPrefetch={prefetchDetail} />;
+    if (isSearch)
+      return (
+        <SearchPage
+          lang={lang}
+          path={path}
+          replace={replace}
+          onOpenDetail={openDetail}
+          onPrefetch={prefetchDetail}
+        />
+      );
     if (!isKnownRoute) return <NotFoundPage lang={lang} onGoHome={goHome} />;
     return (
       <HomePage
@@ -257,14 +269,6 @@ function AppShell() {
           )}
 
           <Suspense fallback={<PageLoader />}>{content}</Suspense>
-
-          <SearchDialog
-            open={searchOpen}
-            lang={lang}
-            onClose={closeSearch}
-            onSelect={openDetail}
-            onPrefetch={prefetchDetail}
-          />
         </>
       )}
     </ThemeProvider>

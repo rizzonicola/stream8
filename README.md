@@ -40,6 +40,10 @@
 | :---: | :---: |
 | ![Desktop home](.github/screenshots/desktop-home.png) | ![Mobile home](.github/screenshots/mobile-home.png) |
 
+| Search — desktop | Search — mobile |
+| :---: | :---: |
+| ![Desktop search](.github/screenshots/search-desktop.png) | ![Mobile search](.github/screenshots/search-mobile.png) |
+
 | Detail — desktop | Detail — mobile |
 | :---: | :---: |
 | ![Desktop detail](.github/screenshots/desktop-detail.png) | ![Mobile detail](.github/screenshots/mobile-detail.png) |

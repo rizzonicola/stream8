@@ -44,7 +44,7 @@ const ALLOWED_ROUTES = [
   },
   { pattern: /^\/movie\/now_playing$/, params: new Set(['language', 'region']) },
   { pattern: /^\/tv\/on_the_air$/, params: new Set(['language']) },
-  { pattern: /^\/search\/multi$/, params: new Set(['language', 'query']) },
+  { pattern: /^\/search\/multi$/, params: new Set(['language', 'query', 'page']) },
   { pattern: /^\/movie\/\d{1,10}$/, params: new Set(['language']) },
   { pattern: /^\/tv\/\d{1,10}$/, params: new Set(['language']) },
   { pattern: /^\/movie\/\d{1,10}\/credits$/, params: new Set(['language']) },
@@ -65,6 +65,10 @@ const PARAM_VALIDATORS = {
   region: (value) => REGION.test(value),
   query: (value) =>
     value.length > 0 && value.length <= QUERY_MAX_LENGTH && !CONTROL_CHARS.test(value),
+  page: (value) => {
+    const page = Number(value);
+    return Number.isInteger(page) && page >= 1 && page <= 500;
+  },
   sort_by: (value) => SORT_BY.has(value),
   'vote_count.gte': (value) => VOTE_COUNT.test(value),
   without_genres: (value) => GENRE_LIST.test(value),
