@@ -266,27 +266,9 @@ export default function HeroSlider({ lang, items, onSelect, onPrefetch }) {
         <Typography
           component="h1"
           variant="h3"
-          sx={{ mb: 1, textWrap: 'balance', maxWidth: 620 }}>
+          sx={{ mb: { xs: 1.75, md: 2.25 }, textWrap: 'balance', maxWidth: 620 }}>
           {current.title}
         </Typography>
-
-        {current.overview && (
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            sx={{
-              mb: 2.25,
-              maxWidth: 540,
-              fontSize: { xs: '0.875rem', md: '0.9375rem' },
-              lineHeight: 1.65,
-              overflow: 'hidden',
-              display: '-webkit-box',
-              WebkitLineClamp: 3,
-              WebkitBoxOrient: 'vertical',
-            }}>
-            {current.overview}
-          </Typography>
-        )}
 
         <Button
           variant="contained"
