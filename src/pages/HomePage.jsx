@@ -39,7 +39,10 @@ function interleave(...lists) {
 function HeroSkeleton() {
   return (
     <Box aria-busy="true">
-      <Skeleton variant="rectangular" height={{ xs: 440, md: 540 }} sx={{ borderRadius: 0 }} />
+      <Skeleton
+        variant="rectangular"
+        sx={{ height: { xs: 440, md: 540 }, borderRadius: 0 }}
+      />
     </Box>
   );
 }
@@ -55,8 +58,7 @@ function SectionSkeleton({ title }) {
           <Box key={i} sx={{ width: { xs: 132, sm: 156 }, flexShrink: 0 }}>
             <Skeleton
               variant="rectangular"
-              height={{ xs: 198, sm: 234 }}
-              sx={{ borderRadius: '12px' }}
+              sx={{ height: { xs: 198, sm: 234 }, borderRadius: '12px' }}
             />
             <Skeleton variant="text" width="82%" sx={{ mt: 1 }} />
             <Skeleton variant="text" width="35%" />

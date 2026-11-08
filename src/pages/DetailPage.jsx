@@ -469,91 +469,94 @@ export default function DetailPage({ lang, params, seed, onBack, onSeasonEpisode
                 </Typography>
               )
             )}
+
+            {/* Stagione, episodio e CTA vivono nella colonna testo: così
+                restano sempre sotto la descrizione e non finiscono mai
+                agganciati alla locandina quando l'overview è corta. */}
+            {isSeries && seasons.length > 0 && (
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mt: 3 }}>
+                <Box sx={{ flex: { sm: '1 1 0' }, maxWidth: { sm: 240 }, minWidth: 0 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                    {t(lang, 'season_label')}
+                  </Typography>
+                  <Select
+                    size="small"
+                    fullWidth
+                    value={season}
+                    onChange={(e) => handleSeasonChange(Number(e.target.value))}
+                    MenuProps={{ PaperProps: { sx: { maxWidth: 320 } } }}
+                    renderValue={(val) => {
+                      const current = seasons.find((s) => s.seasonNumber === val);
+                      const label = current?.name || `${t(lang, 'season_label')} ${val}`;
+                      return (
+                        <Box component="span" sx={ELLIPSIS_SX}>
+                          {label}
+                        </Box>
+                      );
+                    }}
+                  >
+                    {seasons.map((s) => {
+                      const label = s.name || `${t(lang, 'season_label')} ${s.seasonNumber}`;
+                      return (
+                        <MenuItem key={s.seasonNumber} value={s.seasonNumber}>
+                          <Box component="span" sx={ELLIPSIS_SX} title={label}>
+                            {label}
+                          </Box>
+                        </MenuItem>
+                      );
+                    })}
+                  </Select>
+                </Box>
+                <Box sx={{ flex: { sm: '1 1 0' }, maxWidth: { sm: 300 }, minWidth: 0 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                    {t(lang, 'episode_label')}
+                  </Typography>
+                  <Select
+                    size="small"
+                    fullWidth
+                    value={episode}
+                    onChange={(e) => setEpisode(Number(e.target.value))}
+                    MenuProps={{ PaperProps: { sx: { maxWidth: 360 } } }}
+                    renderValue={(val) => {
+                      const current = episodes.find((e) => e.episodeNumber === val);
+                      const label = `${val}. ${current?.name || `${t(lang, 'episode_label')} ${val}`}`;
+                      return (
+                        <Box component="span" sx={ELLIPSIS_SX}>
+                          {label}
+                        </Box>
+                      );
+                    }}
+                  >
+                    {episodes.map((e) => {
+                      const label = `${e.episodeNumber}. ${e.name || `${t(lang, 'episode_label')} ${e.episodeNumber}`}`;
+                      return (
+                        <MenuItem key={e.episodeNumber} value={e.episodeNumber}>
+                          <Box component="span" sx={ELLIPSIS_SX} title={label}>
+                            {label}
+                          </Box>
+                        </MenuItem>
+                      );
+                    })}
+                  </Select>
+                </Box>
+              </Stack>
+            )}
+
+            <Button
+              variant="contained"
+              size="large"
+              startIcon={<PlayArrowRoundedIcon />}
+              onClick={() => setWatchOpen(true)}
+              disabled={!details.title}
+              sx={{ mt: 3 }}
+            >
+              {t(lang, 'hero_watch_on')}
+            </Button>
           </Box>
         </Stack>
 
-        {isSeries && seasons.length > 0 && (
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 3 }}>
-            <Box sx={{ width: { xs: '100%', sm: 240 } }}>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                {t(lang, 'season_label')}
-              </Typography>
-              <Select
-                size="small"
-                fullWidth
-                value={season}
-                onChange={(e) => handleSeasonChange(Number(e.target.value))}
-                MenuProps={{ PaperProps: { sx: { maxWidth: 320 } } }}
-                renderValue={(val) => {
-                  const current = seasons.find((s) => s.seasonNumber === val);
-                  const label = current?.name || `${t(lang, 'season_label')} ${val}`;
-                  return (
-                    <Box component="span" sx={ELLIPSIS_SX}>
-                      {label}
-                    </Box>
-                  );
-                }}
-              >
-                {seasons.map((s) => {
-                  const label = s.name || `${t(lang, 'season_label')} ${s.seasonNumber}`;
-                  return (
-                    <MenuItem key={s.seasonNumber} value={s.seasonNumber}>
-                      <Box component="span" sx={ELLIPSIS_SX} title={label}>
-                        {label}
-                      </Box>
-                    </MenuItem>
-                  );
-                })}
-              </Select>
-            </Box>
-            <Box sx={{ width: { xs: '100%', sm: 300 } }}>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                {t(lang, 'episode_label')}
-              </Typography>
-              <Select
-                size="small"
-                fullWidth
-                value={episode}
-                onChange={(e) => setEpisode(Number(e.target.value))}
-                MenuProps={{ PaperProps: { sx: { maxWidth: 360 } } }}
-                renderValue={(val) => {
-                  const current = episodes.find((e) => e.episodeNumber === val);
-                  const label = `${val}. ${current?.name || `${t(lang, 'episode_label')} ${val}`}`;
-                  return (
-                    <Box component="span" sx={ELLIPSIS_SX}>
-                      {label}
-                    </Box>
-                  );
-                }}
-              >
-                {episodes.map((e) => {
-                  const label = `${e.episodeNumber}. ${e.name || `${t(lang, 'episode_label')} ${e.episodeNumber}`}`;
-                  return (
-                    <MenuItem key={e.episodeNumber} value={e.episodeNumber}>
-                      <Box component="span" sx={ELLIPSIS_SX} title={label}>
-                        {label}
-                      </Box>
-                    </MenuItem>
-                  );
-                })}
-              </Select>
-            </Box>
-          </Stack>
-        )}
-
-        <Button
-          variant="contained"
-          size="large"
-          startIcon={<PlayArrowRoundedIcon />}
-          onClick={() => setWatchOpen(true)}
-          disabled={!details.title}
-          sx={{ mb: 5 }}
-        >
-          {t(lang, 'hero_watch_on')}
-        </Button>
-
         {cast.length > 0 && (
-          <Box>
+          <Box sx={{ mt: { xs: 5, sm: 6 } }}>
             <Typography variant="h6" sx={{ mb: 2 }}>
               {t(lang, 'cast_title')}
             </Typography>

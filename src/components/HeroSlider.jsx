@@ -23,21 +23,27 @@ import { t } from '../i18n';
 
 const AUTOPLAY_MS = 5500;
 
-const arrowSx = {
+// Il pager desktop/tablet resta nell'angolo in basso a destra, dentro la
+// fascia di gradiente: non copre più titolo, descrizione e CTA come le
+// vecchie frecce a metà altezza. Su touch resta disponibile lo swipe e il
+// contatore è solo informativo.
+const pagerSx = {
   position: 'absolute',
-  top: '50%',
-  transform: 'translateY(-50%)',
-  width: 40,
-  height: 40,
-  color: 'text.primary',
-  bgcolor: (theme) =>
-    alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.82 : 0.9),
-  border: '1px solid',
-  borderColor: 'divider',
+  right: { sm: 16, md: 48 },
+  bottom: { sm: 18, md: 26 },
+  zIndex: 2,
   display: { xs: 'none', sm: 'inline-flex' },
-  '&:hover': {
-    bgcolor: 'background.paper',
-  },
+  alignItems: 'center',
+  gap: 0.25,
+  p: 0.5,
+  borderRadius: '999px',
+  border: '1px solid',
+  borderColor: (theme) => alpha(theme.palette.text.primary, 0.14),
+  bgcolor: (theme) =>
+    alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.58 : 0.78),
+  backdropFilter: 'blur(14px)',
+  WebkitBackdropFilter: 'blur(14px)',
+  boxShadow: '0 12px 32px -20px rgba(0, 0, 0, 0.85)',
 };
 
 function MetaDot() {
@@ -292,65 +298,115 @@ export default function HeroSlider({ lang, items, onSelect, onPrefetch }) {
           }}>
           {t(lang, 'hero_watch_on')}
         </Button>
+
+        {/* Su telefono il vecchio muro di puntini diventa una barra di
+            avanzamento segmentata, in flusso sotto la CTA: è leggibile,
+            cliccabile e non copre nulla. */}
+        <Box
+          onClick={(event) => event.stopPropagation()}
+          sx={{
+            display: { xs: 'flex', sm: 'none' },
+            alignItems: 'center',
+            gap: 1.25,
+            mt: 2.25,
+          }}>
+          <Stack
+            direction="row"
+            spacing={0.4}
+            role="group"
+            aria-label={t(lang, 'home_featured')}
+            sx={{ flex: 1, minWidth: 0 }}>
+            {items.map((it, i) => (
+              <Box
+                component="button"
+                type="button"
+                key={`${it.mediaType}-${it.id}-${i}`}
+                onClick={() => handleManual(() => goTo(i))}
+                aria-label={`${t(lang, 'a11y_go_to_slide')} ${i + 1}`}
+                aria-current={i === index ? 'true' : undefined}
+                sx={{
+                  flex: 1,
+                  minWidth: 6,
+                  height: 20,
+                  p: 0,
+                  border: 0,
+                  background: 'transparent',
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                  borderRadius: '2px',
+                }}>
+                <Box
+                  aria-hidden
+                  sx={{
+                    width: '100%',
+                    height: i === index ? 3 : 2,
+                    borderRadius: 2,
+                    bgcolor: (theme) =>
+                      i === index
+                        ? theme.palette.primary.main
+                        : alpha(theme.palette.text.primary, 0.24),
+                    transition: reduceMotion
+                      ? 'none'
+                      : 'height 180ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease',
+                  }}
+                />
+              </Box>
+            ))}
+          </Stack>
+          <Typography
+            component="span"
+            sx={{
+              flexShrink: 0,
+              fontVariantNumeric: 'tabular-nums',
+              fontSize: '0.6875rem',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              color: 'text.secondary',
+            }}>
+            {String(index + 1).padStart(2, '0')} / {String(items.length).padStart(2, '0')}
+          </Typography>
+        </Box>
       </Box>
 
-      <IconButton
-        onClick={() => handleManual(prev)}
-        aria-label={t(lang, 'a11y_previous')}
-        sx={{ ...arrowSx, left: { sm: 12, md: 20 } }}>
-        <ArrowBackIosNewRoundedIcon sx={{ fontSize: 17 }} />
-      </IconButton>
-      <IconButton
-        onClick={() => handleManual(next)}
-        aria-label={t(lang, 'a11y_next')}
-        sx={{ ...arrowSx, right: { sm: 12, md: 20 } }}>
-        <ArrowForwardIosRoundedIcon sx={{ fontSize: 17 }} />
-      </IconButton>
-
-      <Stack
-        direction="row"
-        spacing={0.25}
-        sx={{
-          position: 'absolute',
-          bottom: { xs: 10, md: 16 },
-          right: { xs: 10, md: 18 },
-          zIndex: 2,
-        }}>
-        {items.map((it, i) => (
-          <Box
-            component="button"
-            type="button"
-            key={`${it.mediaType}-${it.id}-${i}`}
-            onClick={() => handleManual(() => goTo(i))}
-            aria-label={`${t(lang, 'a11y_go_to_slide')} ${i + 1}`}
-            aria-current={i === index ? 'true' : undefined}
-            sx={{
-              width: 24,
-              height: 24,
-              p: 0,
-              border: 0,
-              background: 'transparent',
-              display: 'grid',
-              placeItems: 'center',
-              cursor: 'pointer',
-              borderRadius: '50%',
-            }}>
-            <Box
-              aria-hidden
-              sx={{
-                width: i === index ? 20 : 7,
-                height: 7,
-                borderRadius: 4,
-                bgcolor: (theme) =>
-                  i === index
-                    ? theme.palette.primary.main
-                    : alpha(theme.palette.text.primary, 0.26),
-                transition:
-                  'width 220ms cubic-bezier(0.22, 1, 0.36, 1), background-color 200ms ease',
-              }}
-            />
-          </Box>
-        ))}
+      <Stack direction="row" alignItems="center" sx={pagerSx}>
+        <IconButton
+          size="small"
+          onClick={() => handleManual(prev)}
+          aria-label={t(lang, 'a11y_previous')}
+          sx={{
+            width: 30,
+            height: 30,
+            color: 'text.secondary',
+            '&:hover': { color: 'text.primary', bgcolor: 'action.hover' },
+          }}>
+          <ArrowBackIosNewRoundedIcon sx={{ fontSize: 14 }} />
+        </IconButton>
+        <Typography
+          component="span"
+          sx={{
+            minWidth: 48,
+            textAlign: 'center',
+            fontVariantNumeric: 'tabular-nums',
+            fontSize: '0.6875rem',
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            color: 'text.secondary',
+          }}>
+          {String(index + 1).padStart(2, '0')} / {String(items.length).padStart(2, '0')}
+        </Typography>
+        <IconButton
+          size="small"
+          onClick={() => handleManual(next)}
+          aria-label={t(lang, 'a11y_next')}
+          sx={{
+            width: 30,
+            height: 30,
+            color: 'text.secondary',
+            '&:hover': { color: 'text.primary', bgcolor: 'action.hover' },
+          }}>
+          <ArrowForwardIosRoundedIcon sx={{ fontSize: 14 }} />
+        </IconButton>
       </Stack>
     </Box>
   );
