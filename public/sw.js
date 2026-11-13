@@ -14,7 +14,7 @@
 // v2). Senza questo passaggio gli utenti che hanno già installato la PWA
 // continuerebbero a vedere la shell precedente finché la cache non scade.
 
-const CACHE_NAME = 'stream8-shell-v4';
+const CACHE_NAME = 'stream8-shell-v5';
 
 // Solo asset statici: le risposte a richieste `fetch()` generiche (API,
 // documenti, dati) non devono finire nella cache dello shell. Le richieste
@@ -77,14 +77,27 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) return;
 
-  // Navigazioni (cambi di pagina/route dell'app, SPA): prova sempre prima
-  // la rete per avere l'ultima versione; se offline, ripiega sulla shell
-  // precaricata all'installazione, garantita presente.
+  // Navigazioni (cambi di pagina/route dell'app, SPA): mostra subito la shell
+  // in cache (avvio istantaneo) e aggiornala in background per la visita
+  // successiva. Alla prima visita, o se la rete fallisce, si usa la rete.
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).catch(
-        () => caches.match('/index.html', { cacheName: CACHE_NAME })
-      )
+      caches.open(CACHE_NAME).then(async (cache) => {
+        const cached = await cache.match('/index.html');
+        const network = fetch(request)
+          .then(async (response) => {
+            if (response && response.status === 200 && !response.redirected) {
+              try {
+                await cache.put('/index.html', response.clone());
+              } catch {
+                // Quota o storage non disponibile: vale la risposta di rete.
+              }
+            }
+            return response;
+          })
+          .catch(() => cached);
+        return cached || network;
+      })
     );
     return;
   }
